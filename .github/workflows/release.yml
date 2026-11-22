@@ -37,26 +37,46 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Tests
-        run: cargo test --workspace
-
-      - name: Compilation
-        run: cargo build --release --workspace
-
-      - name: WiX Toolset 3.14
-        shell: pwsh
-        run: |
-          Invoke-WebRequest https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip -OutFile wix.zip
-          Expand-Archive wix.zip -DestinationPath wix
-
+      # Avant de compiler : la version est écrite dans les 3 Cargo.toml, pour que les programmes
+      # (journal, éditeur) affichent le même numéro que le .msi.
       - name: Version
         id: version
         shell: pwsh
         run: |
           $base = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(\d+)\.(\d+)\.' | Select-Object -First 1).Matches[0]
           $ver = "$($base.Groups[1].Value).$($base.Groups[2].Value).$env:GITHUB_RUN_NUMBER"
+          foreach ($f in "Cargo.toml", "editor/Cargo.toml", "launcher/Cargo.toml") {
+            $path = (Resolve-Path $f).Path
+            $utf8 = [Text.UTF8Encoding]::new($false)
+            $text = [IO.File]::ReadAllText($path, $utf8)
+            $new = [regex]::new('(?m)^version\s*=\s*"[^"]+"').Replace($text, "version = `"$ver`"", 1)
+            [IO.File]::WriteAllText($path, $new, $utf8)
+          }
           "ver=$ver" >> $env:GITHUB_OUTPUT
-          Write-Host "Version du .msi : $ver"
+          Write-Host "Version : $ver"
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Compilation
+        run: cargo build --release --workspace
+
+      - name: Vérification de la version
+        shell: pwsh
+        env:
+          VER: ${{ steps.version.outputs.ver }}
+        run: |
+          # Le numéro doit être gravé dans l'exécutable du Stream Deck.
+          $bytes = [IO.File]::ReadAllBytes("target/release/soomfon-deck.exe")
+          $text = [Text.Encoding]::ASCII.GetString($bytes)
+          if (-not $text.Contains($env:VER)) { throw "Version $env:VER absente de soomfon-deck.exe" }
+          Write-Host "OK : soomfon-deck.exe est en $env:VER"
+
+      - name: WiX Toolset 3.14
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip -OutFile wix.zip
+          Expand-Archive wix.zip -DestinationPath wix
 
       - name: Installeur .msi
         run: python installer/make-msi.py --wix wix --version ${{ steps.version.outputs.ver }}

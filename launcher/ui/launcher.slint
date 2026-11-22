@@ -1,0 +1,502 @@
+// Lanceur Blackat : fenêtre sans bordure, neige, logo.
+// Écran 0 : « Lancer » (OBS, Streamer.bot, Stream Deck). Écran 1 : « Sauvegarder » (pack de config).
+// Écran 2 : « Installer » (launcher ouvert depuis un pack extrait).
+
+import { LineEdit } from "std-widgets.slint";
+import "../../resources/fonts/Inter-Regular.ttf";
+import "../../resources/fonts/Inter-SemiBold.ttf";
+import "../../resources/fonts/Inter-Bold.ttf";
+
+export struct Flake {
+    x: float,       // position horizontale (0..1)
+    speed: float,   // fraction de hauteur parcourue par seconde
+    phase: float,   // décalage de départ (0..1)
+    size: float,    // diamètre en px
+    drift: float,   // vitesse d'oscillation latérale
+    opacity: float,
+}
+
+export struct AppRow {
+    name: string,
+    state: int,     // 0 attente, 1 en cours, 2 prêt, 3 erreur
+    detail: string,
+}
+
+component StatusRows inherits VerticalLayout {
+    in property <[AppRow]> rows;
+    in property <length> row-width: 300px;
+    for app in root.rows: HorizontalLayout {
+        alignment: center;
+        height: 26px;
+        HorizontalLayout {
+            width: root.row-width;
+            spacing: 10px;
+            Rectangle {
+                width: 9px;
+                height: 9px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 4.5px;
+                background: app.state == 2 ? #3fb950 : app.state == 1 ? #f0b429 : app.state == 3 ? #e5484d : #3b4252;
+                opacity: app.state == 1 ? 0.55 + 0.45 * Math.sin((animation-tick() / 1s) * 7rad) : 1.0;
+            }
+            Text {
+                text: app.name;
+                color: #dbe4ff;
+                vertical-alignment: center;
+            }
+            Text {
+                text: app.detail;
+                color: app.state == 3 ? #ff8a8e : #8ea3cc;
+                horizontal-stretch: 1;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+component BigButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> success;
+    in property <bool> working;
+    in property <length> button-width: 220px;
+    callback clicked;
+    width: button-width;
+    height: 54px;
+    border-radius: 27px;
+    background: success ? #2a9d55
+        : working ? #2a4fae
+        : ta.pressed ? #2556d6
+        : ta.has-hover ? @linear-gradient(90deg, #5a92ff 0%, #3a66e0 100%) : @linear-gradient(90deg, #3a74ff 0%, #2a52c9 100%);
+    drop-shadow-blur: 24px;
+    drop-shadow-color: success ? #2a9d5588 : #3a74ff99;
+    animate background { duration: 150ms; }
+    Text {
+        text: root.text;
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: 700;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+component GhostButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    height: 40px;
+    border-radius: 20px;
+    background: ta.has-hover ? #ffffff1f : #ffffff0f;
+    border-width: 1px;
+    border-color: #ffffff1a;
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        Text {
+            text: root.text;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component LinkText inherits Text {
+    callback clicked;
+    color: ta.has-hover ? #9cc0ff : #6f8fd8;
+    font-size: 12px;
+    horizontal-alignment: center;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Launcher inherits Window {
+    no-frame: true;
+    width: 460px;
+    height: 630px;
+    title: "Blackat";
+    icon: @image-url("blackat-b.svg");
+    background: #05070d;
+    default-font-family: "Inter";
+    default-font-size: 13px;
+
+    in property <[Flake]> flakes;
+    in-out property <int> mode: 0;
+
+    // ── Lancer ──
+    in property <[AppRow]> apps;
+    in property <bool> busy;
+    in property <bool> done;
+    in property <bool> failed;
+    in property <string> message: "OBS, Streamer.bot et le Stream Deck (+ son éditeur) en un clic.";
+
+    // ── Sauvegarder ──
+    in-out property <string> password;
+    in-out property <string> password2;
+    in property <string> backup-dest;
+    in property <bool> backup-started;
+    in property <bool> backup-running;
+    in property <bool> backup-done;
+    in property <bool> backup-failed;
+    in property <bool> backup-need-force;
+    in property <[AppRow]> backup-steps;
+    in property <string> backup-message;
+
+    // ── Installer ──
+    in property <string> install-info;
+    in property <bool> install-started;
+    in property <bool> install-running;
+    in property <bool> install-done;
+    in property <bool> install-failed;
+    in property <[AppRow]> install-steps;
+    in property <string> install-message;
+
+    callback launch();
+    callback close-window();
+    callback drag(length, length);
+    callback open-backup();
+    callback start-backup(bool);     // true = même si OBS / Streamer.bot sont ouverts
+    callback leave-backup();
+    callback open-pack-folder();
+    callback start-install();
+    callback reset-install();
+    callback launch-installed();
+
+    // Fond dégradé nuit.
+    Rectangle {
+        background: @linear-gradient(180deg, #0f1c42 0%, #080c1a 55%, #04050a 100%);
+    }
+
+    // Toute la fenêtre sert de poignée pour la déplacer.
+    TouchArea {
+        moved => {
+            if (self.pressed) {
+                root.drag(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+
+    // Neige : chaque flocon est animé par le moteur Slint (aucun calcul côté Rust).
+    for f in root.flakes: Rectangle {
+        property <float> t: animation-tick() / 1s;
+        width: f.size * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: #ffffff;
+        opacity: f.opacity;
+        x: f.x * root.width + Math.sin((t * f.drift + f.phase * 6.283) * 1rad) * 14px;
+        y: Math.mod(t * f.speed + f.phase, 1.0) * (root.height + 20px) - 10px;
+    }
+
+    // Lueur derrière le logo.
+    Rectangle {
+        x: (root.width - 260px) / 2;
+        y: root.mode == 0 ? 60px : 4px;
+        width: 260px;
+        height: 260px;
+        border-radius: 130px;
+        background: @radial-gradient(circle, #2f5fff40 0%, #2f5fff00 70%);
+    }
+
+    // ── Écran « Lancer » ──
+    if root.mode == 0: VerticalLayout {
+        padding-top: 78px;
+        padding-bottom: 22px;
+
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("blackat-b.svg");
+                width: 190px;
+                height: 190px;
+            }
+        }
+
+        Rectangle { height: 20px; }
+
+        Text {
+            text: "BLACKAT";
+            letter-spacing: 9px;
+            font-size: 26px;
+            font-weight: 700;
+            color: #ffffff;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 6px; }
+        Text {
+            text: root.done ? "Bon stream !" : "Prêt pour le stream ?";
+            color: #8ea3cc;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+
+        Rectangle { height: 32px; }
+
+        HorizontalLayout {
+            alignment: center;
+            BigButton {
+                text: root.done ? "Tout est prêt" : root.busy ? "Lancement…" : root.failed ? "Réessayer" : "Lancer";
+                enabled: !root.busy && !root.done;
+                success: root.done;
+                working: root.busy;
+                clicked => { root.launch(); }
+            }
+        }
+
+        Rectangle { height: 26px; }
+
+        StatusRows { rows: root.apps; }
+
+        Rectangle { vertical-stretch: 1; }
+
+        Text {
+            text: root.message;
+            color: root.failed ? #ff8a8e : #6f82aa;
+            font-size: 12px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Rectangle { height: 8px; }
+        if !root.busy && !root.done: LinkText {
+            text: "Sauvegarder ma config (changer de PC)";
+            clicked => { root.open-backup(); }
+        }
+    }
+
+    // ── Écran « Sauvegarder » ──
+    if root.mode == 1: VerticalLayout {
+        padding-top: 34px;
+        padding-bottom: 22px;
+        padding-left: 40px;
+        padding-right: 40px;
+        spacing: 0px;
+
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("blackat-b.svg");
+                width: 96px;
+                height: 96px;
+            }
+        }
+        Rectangle { height: 12px; }
+        Text {
+            text: "SAUVEGARDE";
+            letter-spacing: 7px;
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: "Un pack pour réinstaller ou changer de PC";
+            color: #8ea3cc;
+            font-size: 12px;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 22px; }
+
+        if !root.backup-started: VerticalLayout {
+            spacing: 8px;
+            Text {
+                text: "Mot de passe du pack (8 caractères minimum)";
+                color: #dbe4ff;
+                font-size: 12px;
+            }
+            LineEdit {
+                input-type: InputType.password;
+                placeholder-text: "Mot de passe";
+                text <=> root.password;
+            }
+            LineEdit {
+                input-type: InputType.password;
+                placeholder-text: "Confirme le mot de passe";
+                text <=> root.password2;
+            }
+            Text {
+                text: "Il protège ta clé de stream et tes connexions (Twitch…). Sans lui, le pack ne peut pas être restauré : note-le bien.";
+                color: #6f82aa;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+            Text {
+                text: "Destination : " + root.backup-dest;
+                color: #8ea3cc;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 8px; }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                GhostButton { text: "Annuler"; clicked => { root.leave-backup(); } }
+                BigButton {
+                    button-width: 200px;
+                    text: root.backup-need-force ? "Sauvegarder quand même" : "Créer le pack";
+                    clicked => { root.start-backup(root.backup-need-force); }
+                }
+            }
+        }
+
+        if root.backup-started: VerticalLayout {
+            spacing: 4px;
+            StatusRows {
+                rows: root.backup-steps;
+                row-width: 380px;
+            }
+            Rectangle { height: 14px; }
+            if !root.backup-running: HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                GhostButton { text: "Retour"; clicked => { root.leave-backup(); } }
+                if root.backup-done: BigButton {
+                    button-width: 200px;
+                    text: "Ouvrir le dossier";
+                    success: true;
+                    clicked => { root.open-pack-folder(); }
+                }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        Text {
+            text: root.backup-message;
+            color: root.backup-failed ? #ff8a8e : #8ea3cc;
+            font-size: 12px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+
+    // ── Écran « Installer » ──
+    if root.mode == 2: VerticalLayout {
+        padding-top: 34px;
+        padding-bottom: 22px;
+        padding-left: 40px;
+        padding-right: 40px;
+
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("blackat-b.svg");
+                width: root.install-started ? 64px : 96px;
+                height: self.width;
+            }
+        }
+        Rectangle { height: 12px; }
+        Text {
+            text: "INSTALLATION";
+            letter-spacing: 7px;
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.install-info;
+            color: #8ea3cc;
+            font-size: 12px;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: root.install-started ? 14px : 22px; }
+
+        if !root.install-started: VerticalLayout {
+            vertical-stretch: 0;
+            spacing: 8px;
+            Text {
+                text: "OBS, ses scènes et sources, Streamer.bot, les overlays et le Stream Deck seront installés et configurés comme sur l'ancien PC.";
+                color: #dbe4ff;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 4px; }
+            Text {
+                text: "Mot de passe du pack";
+                color: #dbe4ff;
+                font-size: 12px;
+            }
+            LineEdit {
+                input-type: InputType.password;
+                placeholder-text: "Mot de passe";
+                text <=> root.password;
+                accepted => { root.start-install(); }
+            }
+            Text {
+                text: "Ferme OBS et Streamer.bot avant. Ce qui existe déjà sur ce PC est gardé à côté (dossiers .bak), rien n'est supprimé.";
+                color: #6f82aa;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 8px; }
+            HorizontalLayout {
+                alignment: center;
+                BigButton {
+                    text: "Installer";
+                    clicked => { root.start-install(); }
+                }
+            }
+        }
+
+        if root.install-started: VerticalLayout {
+            StatusRows {
+                rows: root.install-steps;
+                row-width: 380px;
+            }
+            Rectangle { height: 14px; }
+            if !root.install-running: HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                if root.install-failed: GhostButton { text: "Réessayer"; clicked => { root.reset-install(); } }
+                if root.install-done: BigButton {
+                    button-width: 220px;
+                    text: "Lancer Blackat";
+                    success: true;
+                    clicked => { root.launch-installed(); }
+                }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        Text {
+            text: root.install-message;
+            color: root.install-failed ? #ff8a8e : #8ea3cc;
+            font-size: 12px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+
+    // Bouton fermer (la fenêtre n'a pas de bordure).
+    Rectangle {
+        x: root.width - 44px;
+        y: 12px;
+        width: 32px;
+        height: 32px;
+        border-radius: 16px;
+        background: close-ta.has-hover ? #ffffff1f : transparent;
+        Text {
+            text: "×";
+            color: #c8d4f0;
+            font-size: 20px;
+        }
+        close-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.close-window(); }
+        }
+    }
+}

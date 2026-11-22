@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9cc9ff"/>
+      <stop offset="0.5" stop-color="#3d7bff"/>
+      <stop offset="1" stop-color="#1b3fb8"/>
+    </linearGradient>
+    <linearGradient id="letter" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#cfe3ff"/>
+      <stop offset="1" stop-color="#6fa4ff"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.42" r="0.6">
+      <stop offset="0" stop-color="#1a2a55"/>
+      <stop offset="1" stop-color="#0a1024"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <!-- Halo -->
+  <circle cx="100" cy="100" r="84" fill="none" stroke="#3d7bff" stroke-width="10" opacity="0.55" filter="url(#glow)"/>
+  <!-- Disque + anneau -->
+  <circle cx="100" cy="100" r="84" fill="url(#core)"/>
+  <circle cx="100" cy="100" r="84" fill="none" stroke="url(#ring)" stroke-width="5"/>
+  <circle cx="100" cy="100" r="74" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1.5"/>
+
+  <!-- Lettre centrée dans le disque (boîte d'origine : x 66–159, y 46–166) -->
+  <g transform="translate(100 101) scale(0.78) translate(-112.5 -106)">
+  <!-- Lueur derrière la lettre -->
+  <path fill="#3d7bff" opacity="0.7" filter="url(#glow)" fill-rule="evenodd"
+        d="M66 46 H116 C140 46 153 59 153 77 C153 89 146 98 136 102 C150 106 159 117 159 133 C159 153 144 166 120 166 H66 Z
+           M90 67 V94 H113 C124 94 130 88 130 80.5 C130 73 124 67 113 67 Z
+           M90 113 V145 H117 C129 145 136 138 136 129 C136 120 129 113 117 113 Z"/>
+  <!-- Le B -->
+  <path fill="url(#letter)" fill-rule="evenodd"
+        d="M66 46 H116 C140 46 153 59 153 77 C153 89 146 98 136 102 C150 106 159 117 159 133 C159 153 144 166 120 166 H66 Z
+           M90 67 V94 H113 C124 94 130 88 130 80.5 C130 73 124 67 113 67 Z
+           M90 113 V145 H117 C129 145 136 138 136 129 C136 120 129 113 117 113 Z"/>
+  </g>
+  <!-- Reflet -->
+  <path d="M40 78 A64 64 0 0 1 128 38" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
+</svg>

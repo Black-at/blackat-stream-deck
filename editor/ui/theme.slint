@@ -1,0 +1,148 @@
+// Thème Blackat partagé par toutes les pages de l'éditeur (Stream Deck, Overlays).
+// Police : Inter (intégrée à l'exécutable, licence OFL dans resources/fonts).
+
+import "../../resources/fonts/Inter-Regular.ttf";
+import "../../resources/fonts/Inter-SemiBold.ttf";
+import "../../resources/fonts/Inter-Bold.ttf";
+
+export global Theme {
+    out property <brush> background: @linear-gradient(180deg, #0f1c42 0%, #080c1a 55%, #04050a 100%);
+    out property <string> font: "Inter";
+    out property <brush> card: @linear-gradient(180deg, #111a36e8 0%, #0a1026e0 100%);
+    out property <color> card-border: #ffffff12;
+    out property <length> radius: 16px;
+    out property <color> field: #070b18;
+    out property <color> text: #ffffff;
+    out property <color> soft: #dbe4ff;
+    out property <color> muted: #8ea3cc;
+    out property <color> faint: #7487b3;
+    out property <color> accent: #3a74ff;
+    out property <color> accent-hover: #4b86ff;
+    out property <color> accent-pressed: #2556d6;
+    out property <color> glow: #3a74ff99;
+    out property <color> danger: #e5484d;
+    out property <color> ok: #3fb950;
+}
+
+// ── Petits composants ────────────────────────────────────────────────────────
+
+export component Caption inherits Text {
+    color: Theme.faint;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+export component Label inherits Text {
+    color: Theme.muted;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/// Petite ligne d'aide sous un champ : verte si tout va bien, rouge en cas d'erreur.
+export component Hint inherits Text {
+    in property <bool> error;
+    color: error ? #ff8a8e : #7ee2a8;
+    font-size: 11px;
+    wrap: word-wrap;
+}
+
+export component Card inherits Rectangle {
+    background: Theme.card;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.card-border;
+    drop-shadow-blur: 28px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: #00000070;
+    // Reflet en haut de la carte : donne du relief sans alourdir.
+    Rectangle {
+        x: Theme.radius;
+        y: 0px;
+        width: parent.width - 2 * Theme.radius;
+        height: 1px;
+        background: @linear-gradient(90deg, #ffffff00 0%, #ffffff26 50%, #ffffff00 100%);
+    }
+}
+
+/// Bouton « pilule » : primary = bleu lumineux, sinon discret ; danger = rouge.
+export component Pill inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> danger;
+    in property <length> pill-height: 38px;
+    callback clicked;
+
+    height: pill-height;
+    border-radius: self.height / 2;
+    background: primary
+        ? (ta.pressed ? Theme.accent-pressed : ta.has-hover ? @linear-gradient(90deg, #5a92ff 0%, #3a66e0 100%) : @linear-gradient(90deg, #3a74ff 0%, #2a52c9 100%))
+        : danger
+            ? (ta.has-hover ? #e5484d33 : #e5484d1a)
+            : (ta.has-hover ? #ffffff1f : #ffffff0f);
+    border-width: primary ? 0px : 1px;
+    border-color: danger ? #e5484d55 : #ffffff1a;
+    drop-shadow-blur: primary ? 18px : 0px;
+    drop-shadow-color: Theme.glow;
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        Text {
+            text: root.text;
+            color: root.danger ? #ff8a8e : Theme.text;
+            font-size: 13px;
+            font-weight: root.primary ? 700 : 600;
+            letter-spacing: 0.2px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Bouton rond de la barre de titre (réduire / fermer).
+export component RoundButton inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> danger;
+    callback clicked;
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
+    background: ta.has-hover ? (root.danger ? #e5484dcc : #ffffff1f) : transparent;
+    animate background { duration: 120ms; }
+    Text {
+        text: root.glyph;
+        color: #c8d4f0;
+        font-size: 18px;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+
+export component Swatch inherits Rectangle {
+    in property <color> c;
+    in property <bool> active;
+    callback clicked;
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    background: c;
+    border-width: active ? 2px : 1px;
+    border-color: active ? #ffffff : #ffffff30;
+    drop-shadow-blur: active ? 10px : 0px;
+    drop-shadow-color: c;
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+

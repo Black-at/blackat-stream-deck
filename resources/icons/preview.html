@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Icônes soomfon-deck</title>
+<style>
+  :root { --bg: #15171c; --fg: #e8e8ea; --muted: #8b8f98; }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 20px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 28px 0 10px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 14px; }
+  figure { margin: 0; width: 85px; text-align: center; }
+  .key { width: 85px; height: 85px; border-radius: 10px; display: grid; place-items: center; box-shadow: inset 0 0 0 1px #ffffff14; }
+  .key img { width: 62%; height: 62%; }
+  .key.app img { width: 78%; height: 78%; }
+  figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>Icônes soomfon-deck</h1>
+<p>Aperçu à la taille réelle des touches (85 × 85 px). Les couleurs de fond seront réglables par touche dans l'éditeur.</p>
+<div id="root"></div>
+<script>
+  const sets = {
+    nav: ["back", "folder", "home"],
+    obs: ["record", "record-stop", "record-pause", "live", "live-stop", "replay-buffer", "screenshot",
+          "scene", "studio-mode", "mic", "mic-off", "speaker", "speaker-off", "source-show", "source-hide"],
+    scenes: ["starting-soon", "brb", "ending", "gameplay", "just-chatting", "webcam", "desktop"],
+    misc: ["meme", "timer", "marker", "clip", "music", "play-pause", "next", "previous",
+           "headset-off", "keyboard", "launch", "volume-up", "volume-down"],
+    apps: ["obs", "discord", "spotify", "streamerbot", "steam", "epic-games", "edge"],
+  };
+  const colors = ["#7a1f2b", "#1f5f3a", "#1f3f7a", "#7a5a12", "#5a2a7a", "#12636b", "#333842"];
+  const root = document.getElementById("root");
+  let c = 0;
+  for (const [dir, names] of Object.entries(sets)) {
+    const h = document.createElement("h2"); h.textContent = dir; root.appendChild(h);
+    const grid = document.createElement("div"); grid.className = "grid"; root.appendChild(grid);
+    for (const n of names) {
+      const ext = dir === "apps" ? "png" : "svg";
+      const fig = document.createElement("figure");
+      const bg = dir === "apps" ? "#22252c" : colors[c++ % colors.length];
+      fig.innerHTML = `<div class="key ${dir === "apps" ? "app" : ""}" style="background:${bg}"><img src="${dir}/${n}.${ext}" alt=""></div><figcaption>${dir}/${n}</figcaption>`;
+      grid.appendChild(fig);
+    }
+  }
+</script>
+</body>
+</html>

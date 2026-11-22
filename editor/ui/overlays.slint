@@ -1,0 +1,470 @@
+// Onglet Overlays : bibliothèque (gauche), aperçu OBS (centre), réglages sans code (droite).
+// Tout l'état vient du code Rust via le global `OV`.
+
+import { ComboBox, LineEdit, Slider, ScrollView, Switch } from "std-widgets.slint";
+import { Theme, Caption, Label, Card, Pill } from "theme.slint";
+
+export struct OverlayRow {
+    name: string,
+    file: string,
+    enabled: bool,
+}
+
+export struct FieldRow {
+    kind: string,       // color | slider | text | select | toggle
+    label: string,
+    value: string,      // valeur affichée (texte, couleur #rrggbb, nombre…)
+    number: float,      // valeur numérique pour les curseurs
+    min: float,
+    max: float,
+    step: float,
+    unit: string,       // px | ms | % | ""
+    options: [string],
+    option-index: int,
+    modified: bool,
+    swatch: color,      // aperçu pour les couleurs
+}
+
+export global OV {
+    // Dossier Studio
+    in property <bool> studio-ok;
+    in property <string> studio-dir;
+
+    // Bibliothèque
+    in property <[OverlayRow]> items;
+    in-out property <int> selected: -1;   // -1 = thème commun
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> enabled;
+    in-out property <string> name-edit;
+    in-out property <bool> confirm-delete;
+
+    // Réglages
+    in property <[string]> groups;
+    in-out property <int> group;
+    in property <[FieldRow]> fields;
+
+    // Aperçu et OBS
+    in property <image> preview;
+    in property <bool> has-preview;
+    in property <string> preview-status;
+    in property <bool> preview-busy;
+    in property <[string]> res-options;
+    in-out property <int> res-index;
+    in-out property <string> custom-w: "1920";
+    in-out property <string> custom-h: "1080";
+    in property <string> url;
+    in property <string> checks;          // lignes de vérification (fichier, OBS, Streamer.bot)
+    in property <bool> can-use-studio;
+    in property <string> use-studio-label;
+    in-out property <bool> auto-refresh: true;
+
+    callback select(int);
+    callback group-chosen(int);
+    callback field-text(int, string);
+    callback field-number(int, float);
+    callback field-option(int, int);
+    callback field-toggle(int, bool);
+    callback field-reset(int);
+    callback reset-all();
+    callback toggle-enabled(bool);
+    callback duplicate();
+    callback rename(string);
+    callback delete-ask();
+    callback delete-confirm();
+    callback import();
+    callback export();
+    callback refresh-preview();
+    callback res-chosen(int);
+    callback custom-size(string, string);
+    callback copy-url();
+    callback refresh-obs();
+    callback use-studio();
+    callback apply-size();
+    callback open-folder();
+    // Appelé par le code Rust quand des réponses d'OBS attendent (thread de fond).
+    callback obs-event();
+}
+
+component LibraryRow inherits Rectangle {
+    in property <string> name;
+    in property <string> file;
+    in property <bool> enabled;
+    in property <bool> active;
+    in property <bool> theme;
+    callback clicked;
+
+    height: 46px;
+    border-radius: 14px;
+    background: active ? @linear-gradient(90deg, #3a74ff 0%, #2a52c9 100%) : (ta.has-hover ? #ffffff12 : transparent);
+    drop-shadow-blur: active ? 16px : 0px;
+    drop-shadow-color: Theme.glow;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 10px;
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 4px;
+            background: root.theme ? #ffffff : root.enabled ? Theme.ok : #6f82aa;
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.name;
+                color: root.active ? #ffffff : Theme.soft;
+                font-weight: root.active ? 700 : 500;
+                overflow: elide;
+            }
+            Text {
+                text: root.file;
+                color: root.active ? #dbe4ffcc : Theme.faint;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SmallPill inherits Pill {
+    pill-height: 32px;
+}
+
+component FieldEditor inherits VerticalLayout {
+    in property <FieldRow> field;
+    in property <int> index;
+    spacing: 6px;
+
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: root.field.label;
+            color: Theme.soft;
+            font-size: 12px;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        if root.field.modified: Text {
+            text: "Réinitialiser";
+            color: reset-ta.has-hover ? Theme.accent-hover : #7fa6ff;
+            font-size: 11px;
+            vertical-alignment: center;
+            reset-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { OV.field-reset(root.index); }
+            }
+        }
+    }
+
+    if root.field.kind == "color": HorizontalLayout {
+        spacing: 8px;
+        Rectangle {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: root.field.swatch;
+            border-width: 1px;
+            border-color: #ffffff30;
+        }
+        LineEdit {
+            text: root.field.value;
+            placeholder-text: "#rrggbb";
+            accepted(t) => { OV.field-text(root.index, t); }
+            edited(t) => {
+                if (t.character-count == 7) { OV.field-text(root.index, t); }
+            }
+        }
+    }
+
+    if root.field.kind == "slider": HorizontalLayout {
+        spacing: 10px;
+        slider := Slider {
+            horizontal-stretch: 1;
+            minimum: root.field.min;
+            maximum: root.field.max;
+            step: root.field.step;
+            value: root.field.number;
+            released(v) => { OV.field-number(root.index, v); }
+        }
+        Text {
+            width: 64px;
+            text: Math.round(slider.value) + " " + root.field.unit;
+            color: Theme.soft;
+            font-size: 12px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.field.kind == "text": LineEdit {
+        text: root.field.value;
+        edited(t) => { OV.field-text(root.index, t); }
+    }
+
+    if root.field.kind == "select": ComboBox {
+        model: root.field.options;
+        current-index: root.field.option-index;
+        selected => { OV.field-option(root.index, self.current-index); }
+    }
+
+    if root.field.kind == "toggle": HorizontalLayout {
+        alignment: start;
+        Switch {
+            text: root.field.value == "true" ? "Oui" : "Non";
+            checked: root.field.value == "true";
+            toggled => { OV.field-toggle(root.index, self.checked); }
+        }
+    }
+}
+
+export component OverlaysPage inherits HorizontalLayout {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 8px;
+    spacing: 16px;
+
+    // ── Bibliothèque ──
+    Card {
+        width: 250px;
+        VerticalLayout {
+            padding: 16px;
+            spacing: 6px;
+            Caption { text: "OVERLAYS"; }
+            Label { text: "Copie Studio — tes fichiers d'origine ne sont pas modifiés"; font-size: 11px; wrap: word-wrap; }
+            Rectangle { height: 6px; }
+            LibraryRow {
+                name: "Thème commun";
+                file: "couleurs, polices, textes partagés";
+                theme: true;
+                active: OV.selected == -1;
+                clicked => { OV.select(-1); }
+            }
+            Rectangle { height: 1px; background: #ffffff14; }
+            for item[i] in OV.items: LibraryRow {
+                name: item.name;
+                file: item.file;
+                enabled: item.enabled;
+                active: OV.selected == i;
+                clicked => { OV.select(i); }
+            }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 6px;
+                SmallPill { text: "Importer"; horizontal-stretch: 1; clicked => { OV.import(); } }
+                SmallPill { text: "Dossier"; horizontal-stretch: 1; clicked => { OV.open-folder(); } }
+            }
+        }
+    }
+
+    // ── Aperçu ──
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 12px;
+
+        if !OV.studio-ok: Card {
+            VerticalLayout {
+                padding: 24px;
+                spacing: 10px;
+                alignment: center;
+                Text { text: "Dossier Studio introuvable"; color: Theme.text; font-size: 18px; font-weight: 700; }
+                Label { text: OV.studio-dir; wrap: word-wrap; }
+            }
+        }
+
+        if OV.studio-ok: VerticalLayout {
+            spacing: 12px;
+
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Text { text: OV.title; color: Theme.text; font-size: 20px; font-weight: 700; overflow: elide; }
+                    Text { text: OV.subtitle; color: Theme.muted; font-size: 12px; overflow: elide; }
+                }
+                if OV.selected >= 0: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+                    Switch {
+                        text: OV.enabled ? "Activé" : "Désactivé";
+                        checked: OV.enabled;
+                        toggled => { OV.toggle-enabled(self.checked); }
+                    }
+                }
+            }
+
+            // Zone d'aperçu : remplit la hauteur disponible, l'image garde ses proportions.
+            Rectangle {
+                vertical-stretch: 1;
+                min-height: 200px;
+                border-radius: 16px;
+                background: #05070d;
+                border-width: 1px;
+                border-color: #3a74ff40;
+                drop-shadow-blur: 30px;
+                drop-shadow-color: #3a74ff33;
+                clip: true;
+
+                if OV.has-preview: Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: OV.preview;
+                    image-fit: contain;
+                }
+                if !OV.has-preview || OV.preview-busy: Rectangle {
+                    background: OV.has-preview ? #05070daa : transparent;
+                    Text {
+                        text: OV.preview-status;
+                        color: Theme.muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        width: parent.width - 60px;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                ComboBox {
+                    width: 170px;
+                    model: OV.res-options;
+                    current-index <=> OV.res-index;
+                    selected => { OV.res-chosen(self.current-index); }
+                }
+                if OV.res-index == 3: HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit { width: 70px; text <=> OV.custom-w; accepted => { OV.custom-size(OV.custom-w, OV.custom-h); } }
+                    Text { text: "×"; color: Theme.muted; vertical-alignment: center; }
+                    LineEdit { width: 70px; text <=> OV.custom-h; accepted => { OV.custom-size(OV.custom-w, OV.custom-h); } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                SmallPill { text: "Actualiser l'aperçu"; primary: true; clicked => { OV.refresh-preview(); } }
+            }
+
+            // OBS
+            Card {
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 8px;
+                    Caption { text: "DANS OBS"; }
+                    Text { text: OV.checks; color: Theme.soft; font-size: 12px; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: OV.url;
+                            color: Theme.faint;
+                            font-size: 11px;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        SmallPill { text: "Copier l'URL"; clicked => { OV.copy-url(); } }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        SmallPill { text: "Rafraîchir dans OBS"; clicked => { OV.refresh-obs(); } }
+                        SmallPill { text: "Taille → source OBS"; clicked => { OV.apply-size(); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        Switch {
+                            text: "Rafraîchir à chaque réglage";
+                            checked <=> OV.auto-refresh;
+                        }
+                    }
+                    if OV.can-use-studio: HorizontalLayout {
+                        SmallPill { text: OV.use-studio-label; primary: true; clicked => { OV.use-studio(); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Réglages ──
+    Card {
+        width: 360px;
+        sv := ScrollView {
+            width: parent.width;
+            height: parent.height;
+            content-width: sv.visible-width;
+            content-height: max(sv.visible-height, panel.preferred-height);
+            panel := VerticalLayout {
+                width: sv.visible-width;
+                padding: 18px;
+                spacing: 12px;
+                alignment: start;
+
+                Caption { text: OV.selected == -1 ? "THÈME COMMUN" : "RÉGLAGES"; }
+
+                // Groupes
+                HorizontalLayout {
+                    spacing: 4px;
+                    for g[i] in OV.groups: Rectangle {
+                        height: 28px;
+                        horizontal-stretch: 1;
+                        border-radius: 14px;
+                        background: OV.group == i ? Theme.accent : (gta.has-hover ? #ffffff14 : #ffffff08);
+                        Text {
+                            text: g;
+                            color: OV.group == i ? #ffffff : Theme.muted;
+                            font-size: 10px;
+                            font-weight: 600;
+                        }
+                        gta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { OV.group-chosen(i); }
+                        }
+                    }
+                }
+
+                for field[i] in OV.fields: FieldEditor {
+                    field: field;
+                    index: i;
+                }
+
+                if OV.fields.length == 0: Label { text: "Aucun réglage dans ce groupe pour cet overlay."; wrap: word-wrap; }
+
+                Rectangle { height: 6px; }
+                Pill { text: "Tout réinitialiser"; danger: true; clicked => { OV.reset-all(); } }
+
+                if OV.selected >= 0: VerticalLayout {
+                    spacing: 8px;
+                    Rectangle { height: 8px; }
+                    Caption { text: "BIBLIOTHÈQUE"; }
+                    Label { text: "Nom affiché (Entrée pour valider)"; }
+                    LineEdit {
+                        text <=> OV.name-edit;
+                        accepted(t) => { OV.rename(t); }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        SmallPill { text: "Dupliquer"; horizontal-stretch: 1; clicked => { OV.duplicate(); } }
+                        SmallPill { text: "Exporter"; horizontal-stretch: 1; clicked => { OV.export(); } }
+                    }
+                    if !OV.confirm-delete: Pill { text: "Supprimer cet overlay"; danger: true; clicked => { OV.delete-ask(); } }
+                    if OV.confirm-delete: VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Supprimer « " + OV.title + " » de la copie Studio ? (tes fichiers d'origine ne sont pas touchés)";
+                            color: #ff8a8e;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            SmallPill { text: "Oui, supprimer"; danger: true; horizontal-stretch: 1; clicked => { OV.delete-confirm(); } }
+                            SmallPill { text: "Annuler"; horizontal-stretch: 1; clicked => { OV.confirm-delete = false; } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

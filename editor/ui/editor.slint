@@ -1,0 +1,896 @@
+// Éditeur soomfon-deck : pages à gauche, boîtier (3×5) au centre, réglages de la touche à droite.
+// Toutes les modifications sont enregistrées automatiquement : le boîtier se met à jour en direct.
+// Style : identique au lanceur Blackat (nuit bleue, neige, accents lumineux, fenêtre sans bordure).
+
+import { CheckBox, ComboBox, LineEdit, Slider, ScrollView } from "std-widgets.slint";
+import { Theme, Caption, Label, Card, Pill, RoundButton, Swatch, Hint } from "theme.slint";
+import { OverlaysPage, OV, OverlayRow, FieldRow } from "overlays.slint";
+
+export { OV, OverlayRow, FieldRow }
+
+export struct Tile {
+    image: image,
+    empty: bool,
+    locked: bool,
+}
+
+export struct PageItem {
+    name: string,
+    folder: bool,
+}
+
+export struct Flake {
+    x: float,
+    speed: float,
+    phase: float,
+    size: float,
+    drift: float,
+    opacity: float,
+}
+
+component KeyTile inherits Rectangle {
+    in property <image> img;
+    in property <bool> selected;
+    in property <bool> empty;
+    in property <bool> locked;
+    callback clicked;
+
+    width: 104px;
+    height: 104px;
+    border-radius: 16px;
+    background: touch.has-hover && !locked ? #121a33 : #070a14;
+    border-width: selected ? 2px : 1px;
+    border-color: selected ? Theme.accent-hover : touch.has-hover ? #ffffff2e : #ffffff14;
+    drop-shadow-blur: selected ? 22px : 0px;
+    drop-shadow-color: Theme.glow;
+    animate background, border-color { duration: 120ms; }
+
+    Rectangle {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: parent.height - 16px;
+        border-radius: 10px;
+        clip: true;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.img;
+            image-rendering: smooth;
+        }
+    }
+
+    if root.empty: Text {
+        text: "+";
+        color: touch.has-hover ? #8ea3cc : #ffffff30;
+        font-size: 30px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.locked ? default : pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component PageButton inherits Rectangle {
+    in property <string> name;
+    in property <bool> folder;
+    in property <bool> active;
+    callback clicked;
+
+    height: 38px;
+    border-radius: 19px;
+    background: active ? @linear-gradient(90deg, #3a74ff 0%, #2a52c9 100%) : (touch.has-hover ? #ffffff12 : transparent);
+    drop-shadow-blur: active ? 16px : 0px;
+    drop-shadow-color: Theme.glow;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 10px;
+        Image {
+            width: 16px;
+            source: root.folder ? @image-url("../../resources/icons/nav/folder.svg") : @image-url("../../resources/icons/nav/home.svg");
+            colorize: root.active ? #ffffff : Theme.muted;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            horizontal-alignment: left;
+            text: root.name;
+            color: root.active ? #ffffff : Theme.soft;
+            font-weight: root.active ? 700 : 500;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ── Fenêtre ──────────────────────────────────────────────────────────────────
+
+export component MainWindow inherits Window {
+    title: "Blackat — Stream Deck";
+    icon: @image-url("../../launcher/ui/blackat-b.svg");
+    no-frame: true;
+    // Pages (230) + boîtier (616 + écran latéral 140 + marges) + réglages (340) côte à côte.
+    width: 1480px;
+    height: 780px;
+    background: #05070d;
+    default-font-family: Theme.font;
+    default-font-size: 13px;
+
+    // ── Décor ──
+    in property <[Flake]> flakes;
+
+    // ── Pages ──
+    in property <[PageItem]> pages;
+    in-out property <int> current-page;
+    in property <bool> is-folder;
+    in-out property <string> folder-name;
+
+    // ── Grille ──
+    in property <[Tile]> tiles;
+    in-out property <int> selected-pos: -1;
+    in property <bool> selected-locked;
+    in property <bool> selected-empty: true;
+
+    // ── Écran latéral (3 cases à droite des touches, affichage seul) ──
+    in property <[Tile]> side-tiles;
+    in-out property <int> selected-side: -1;
+    in property <[string]> side-options;
+    in-out property <int> side-index;
+    callback select-side(int);
+    callback side-chosen(int);
+
+    // ── Réglages de la touche ──
+    in-out property <string> key-label;
+    in-out property <string> key-color;
+    in property <[string]> icons;
+    in-out property <int> icon-index;
+    in property <image> icon-preview;
+    in property <[string]> action-names;
+    in-out property <int> action-index;
+    in property <string> param-kind; // "", "scene", "input", "media", "source", "folder"
+    in property <[string]> scene-options;
+    in-out property <int> scene-index;
+    in-out property <string> scene-text;
+    in property <[string]> input-options;
+    in-out property <int> input-index;
+    in-out property <string> input-text;
+    in property <[string]> source-options;
+    in-out property <int> source-index;
+    in-out property <string> source-text;
+    in property <[string]> folder-options;
+    in-out property <int> folder-index;
+    in property <[string]> mediakey-options;
+    in-out property <int> mediakey-index;
+    in property <[string]> sb-options;
+    in-out property <int> sb-index;
+    in-out property <string> sb-text;
+    in property <string> sb-hint;
+    in property <[color]> swatch-colors;
+    in property <[string]> swatch-values;
+    in property <string> hint;
+
+    // ── Barre du haut / bas ──
+    in-out property <float> brightness: 70;
+    in property <string> obs-status;
+    in property <bool> obs-ok;
+    in property <string> status;
+    in property <bool> status-error;
+
+    callback select-page(int);
+    callback select-key(int);
+    callback add-folder();
+    callback delete-folder();
+    callback rename-folder(string);
+    callback label-edited(string);
+    callback color-edited(string);
+    callback icon-chosen(int);
+    callback action-chosen(int);
+    callback scene-chosen(int);
+    callback scene-typed(string);
+    callback input-chosen(int);
+    callback input-typed(string);
+    callback source-chosen(int);
+    callback source-typed(string);
+    callback folder-chosen(int);
+    callback mediakey-chosen(int);
+    in property <[string]> coil-options;
+    in-out property <int> coil-index;
+    callback coil-chosen(int);
+    callback sb-chosen(int);
+    callback sb-typed(string);
+    // Plugins
+    in-out property <string> hotkey-text;
+    in property <string> hotkey-hint;
+    in property <bool> hotkey-error;
+    callback hotkey-typed(string);
+    in-out property <string> launch-text;
+    in-out property <string> launch-args;
+    callback launch-typed(string);
+    callback launch-args-typed(string);
+    callback launch-browse();
+    in-out property <string> sound-text;
+    in-out property <float> sound-volume: 80;
+    callback sound-typed(string);
+    callback sound-browse();
+    callback sound-volume-released(float);
+    callback sound-test();
+    in property <[string]> countdown-options;
+    in-out property <int> countdown-index;
+    callback countdown-chosen(int);
+    callback clear-key();
+    callback open-folder();
+    callback brightness-released(float);
+    callback refresh-obs();
+    callback open-icons-folder();
+    in-out property <bool> autostart;
+    in property <bool> official-autostart;
+    callback autostart-toggled(bool);
+    callback disable-official();
+    // Appelé par le code Rust quand les listes OBS sont arrivées (thread de fond).
+    callback obs-loaded();
+    // Fenêtre sans bordure.
+    callback drag(length, length);
+    callback minimize-window();
+    callback close-window();
+    // Onglet affiché : 0 = Stream Deck, 1 = Overlays.
+    in-out property <int> section: 0;
+    callback section-changed(int);
+
+    // Fond nuit + lueur derrière le boîtier.
+    Rectangle { background: Theme.background; }
+    Rectangle {
+        x: (root.width - 820px) / 2;
+        y: 90px;
+        width: 820px;
+        height: 560px;
+        border-radius: 280px;
+        background: @radial-gradient(circle, #2f5fff2e 0%, #2f5fff00 70%);
+    }
+
+    // Neige figée : même décor que le lanceur, mais sans animation. Une neige animée obligerait
+    // à redessiner toute la fenêtre 60 fois par seconde (~30 % d'un cœur CPU mesuré).
+    for f in root.flakes: Rectangle {
+        width: f.size * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: #ffffff;
+        opacity: f.opacity;
+        x: f.x * root.width;
+        y: f.phase * root.height;
+    }
+
+    VerticalLayout {
+        // ── Barre de titre (sert aussi à déplacer la fenêtre) ──
+        Rectangle {
+            height: 60px;
+            TouchArea {
+                moved => {
+                    if (self.pressed) {
+                        root.drag(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                    }
+                }
+            }
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 14px;
+                spacing: 14px;
+
+                Image {
+                    source: @image-url("../../launcher/ui/blackat-b.svg");
+                    width: 34px;
+                    height: 34px;
+                    y: (parent.height - self.height) / 2;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "BLACKAT";
+                        color: Theme.text;
+                        font-size: 16px;
+                        font-weight: 700;
+                        letter-spacing: 5px;
+                    }
+                    Text {
+                        text: "Stream Deck · éditeur";
+                        color: Theme.muted;
+                        font-size: 11px;
+                    }
+                }
+
+                // Onglets : piste segmentée
+                Rectangle { width: 8px; }
+                Rectangle {
+                    width: 2 * 128px + 4px + 2 * 4px;
+                    height: 42px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 21px;
+                    background: #ffffff08;
+                    border-width: 1px;
+                    border-color: #ffffff10;
+                    HorizontalLayout {
+                        padding: 4px;
+                        spacing: 4px;
+                        for tab[i] in ["Stream Deck", "Overlays"]: Rectangle {
+                            width: 128px;
+                            border-radius: 17px;
+                            background: root.section == i ? @linear-gradient(90deg, #3a74ff 0%, #2a52c9 100%) : (tab-ta.has-hover ? #ffffff10 : #ffffff00);
+                            drop-shadow-blur: root.section == i ? 14px : 0px;
+                            drop-shadow-color: Theme.glow;
+                            Text {
+                                text: tab;
+                                color: root.section == i ? #ffffff : Theme.muted;
+                                font-weight: 600;
+                            }
+                            tab-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.section = i;
+                                    root.section-changed(i);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // État OBS
+                Rectangle {
+                    horizontal-stretch: 0;
+                    height: 32px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 16px;
+                    background: #ffffff0d;
+                    border-width: 1px;
+                    border-color: #ffffff14;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 14px;
+                        spacing: 8px;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: root.obs-ok ? Theme.ok : Theme.danger;
+                            drop-shadow-blur: 8px;
+                            drop-shadow-color: root.obs-ok ? Theme.ok : Theme.danger;
+                        }
+                        Text {
+                            text: root.obs-status;
+                            color: Theme.soft;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                Pill {
+                    text: "Actualiser";
+                    pill-height: 32px;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.refresh-obs(); }
+                }
+
+                // Luminosité
+                HorizontalLayout {
+                    horizontal-stretch: 0;
+                    spacing: 8px;
+                    Text {
+                        text: "Luminosité";
+                        color: Theme.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    Slider {
+                        width: 120px;
+                        minimum: 0;
+                        maximum: 100;
+                        value <=> root.brightness;
+                        released(v) => { root.brightness-released(v); }
+                    }
+                    Text {
+                        text: Math.round(root.brightness) + " %";
+                        color: Theme.soft;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        width: 38px;
+                    }
+                }
+
+                RoundButton {
+                    glyph: "–";
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.minimize-window(); }
+                }
+                RoundButton {
+                    glyph: "×";
+                    danger: true;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.close-window(); }
+                }
+            }
+        }
+
+        if root.section == 0: HorizontalLayout {
+            vertical-stretch: 1;
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-bottom: 8px;
+            spacing: 16px;
+
+            // ── Pages ──
+            Card {
+                width: 230px;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 6px;
+                    Caption { text: "PAGES"; }
+                    Label { text: "1 seul niveau de dossiers"; font-size: 11px; }
+                    Rectangle { height: 6px; }
+                    for page[i] in root.pages: PageButton {
+                        name: page.name;
+                        folder: page.folder;
+                        active: i == root.current-page;
+                        clicked => { root.select-page(i); }
+                    }
+                    Rectangle { height: 8px; }
+                    Pill {
+                        text: "+  Nouveau dossier";
+                        clicked => { root.add-folder(); }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    if root.is-folder: VerticalLayout {
+                        spacing: 8px;
+                        Caption { text: "CE DOSSIER"; }
+                        LineEdit {
+                            text <=> root.folder-name;
+                            accepted(t) => { root.rename-folder(t); }
+                        }
+                        Label { text: "Entrée pour valider le nom"; font-size: 11px; }
+                        Pill {
+                            text: "Supprimer le dossier";
+                            danger: true;
+                            clicked => { root.delete-folder(); }
+                        }
+                    }
+                }
+            }
+
+            // ── Boîtier ──
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 18px;
+                alignment: center;
+
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 5 * 104px + 4 * 12px + 48px + 140px;
+                        height: 3 * 104px + 2 * 12px + 48px;
+                        border-radius: 26px;
+                        background: @linear-gradient(160deg, #10172c 0%, #070a14 100%);
+                        border-width: 1px;
+                        border-color: #3a74ff40;
+                        drop-shadow-blur: 40px;
+                        drop-shadow-color: #3a74ff40;
+
+                        for tile[i] in root.tiles: KeyTile {
+                            x: 24px + mod(i, 5) * (104px + 12px);
+                            y: 24px + floor(i / 5) * (104px + 12px);
+                            img: tile.image;
+                            empty: tile.empty;
+                            locked: tile.locked;
+                            selected: i == root.selected-pos;
+                            clicked => { root.select-key(i); }
+                        }
+
+                        // Séparation touches | écran latéral.
+                        Rectangle {
+                            x: 24px + 5 * 104px + 4 * 12px + 18px;
+                            y: 30px;
+                            width: 1px;
+                            height: parent.height - 60px;
+                            background: #3a74ff30;
+                        }
+
+                        for tile[i] in root.side-tiles: KeyTile {
+                            x: 24px + 5 * 104px + 4 * 12px + 36px;
+                            y: 24px + i * (104px + 12px);
+                            img: tile.image;
+                            empty: false;
+                            locked: false;
+                            selected: i == root.selected-side;
+                            clicked => { root.select-side(i); }
+                        }
+                    }
+                }
+                Text {
+                    text: root.hint;
+                    color: Theme.muted;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+
+            // ── Réglages ──
+            Card {
+                width: 340px;
+                sv := ScrollView {
+                    width: parent.width;
+                    height: parent.height;
+                    content-width: sv.visible-width;
+                    content-height: max(sv.visible-height, panel.preferred-height);
+                    panel := VerticalLayout {
+                        width: sv.visible-width;
+                        padding: 18px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        if root.selected-side >= 0: VerticalLayout {
+                            spacing: 10px;
+                            Caption { text: "ÉCRAN DE DROITE"; }
+                            Text {
+                                text: root.selected-side == 0 ? "Case du haut" : root.selected-side == 1 ? "Case du milieu" : "Case du bas";
+                                color: Theme.text;
+                                font-size: 18px;
+                                font-weight: 700;
+                            }
+                            Rectangle { height: 4px; }
+                            Caption { text: "CONTENU"; }
+                            ComboBox {
+                                model: root.side-options;
+                                current-index <=> root.side-index;
+                                selected => { root.side-chosen(self.current-index); }
+                            }
+                            Label {
+                                text: "Affichage seul : cet écran n'est pas un bouton. Le boîtier se met à jour en direct (la musique toutes les 2 s, l'heure chaque minute).";
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        if root.selected-pos < 0 && root.selected-side < 0: VerticalLayout {
+                            spacing: 10px;
+                            Caption { text: "TOUCHE"; }
+                            Text {
+                                text: "Clique sur une touche du boîtier pour la configurer.";
+                                color: Theme.soft;
+                                wrap: word-wrap;
+                            }
+                            Label {
+                                text: "Les changements sont enregistrés tout seuls et apparaissent aussitôt sur le SOOMFON.";
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        if root.selected-pos >= 0 && root.selected-locked: VerticalLayout {
+                            spacing: 10px;
+                            Caption { text: "TOUCHE RETOUR"; }
+                            Text {
+                                text: "Dans un dossier, la touche en bas à droite ramène toujours à la page racine. Elle n'est pas modifiable.";
+                                color: Theme.soft;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        if root.selected-pos >= 0 && !root.selected-locked: VerticalLayout {
+                            spacing: 8px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "Touche " + (root.selected-pos + 1);
+                                    color: Theme.text;
+                                    font-size: 18px;
+                                    font-weight: 700;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+
+                            Rectangle { height: 4px; }
+                            Caption { text: "ACTION"; }
+                            ComboBox {
+                                model: root.action-names;
+                                current-index <=> root.action-index;
+                                selected => { root.action-chosen(self.current-index); }
+                            }
+
+                            // Paramètre de l'action
+                            if root.param-kind == "scene" || root.param-kind == "source": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Scène OBS"; }
+                                if root.scene-options.length > 0: ComboBox {
+                                    model: root.scene-options;
+                                    current-index <=> root.scene-index;
+                                    selected => { root.scene-chosen(self.current-index); }
+                                }
+                                if root.scene-options.length == 0: LineEdit {
+                                    placeholder-text: "Nom exact de la scène";
+                                    text <=> root.scene-text;
+                                    edited(t) => { root.scene-typed(t); }
+                                }
+                            }
+                            if root.param-kind == "source": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Source dans la scène"; }
+                                if root.source-options.length > 0: ComboBox {
+                                    model: root.source-options;
+                                    current-index <=> root.source-index;
+                                    selected => { root.source-chosen(self.current-index); }
+                                }
+                                if root.source-options.length == 0: LineEdit {
+                                    placeholder-text: "Nom exact de la source";
+                                    text <=> root.source-text;
+                                    edited(t) => { root.source-typed(t); }
+                                }
+                            }
+                            if root.param-kind == "input" || root.param-kind == "media": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: root.param-kind == "media" ? "Source média OBS" : "Entrée audio OBS"; }
+                                if root.input-options.length > 0: ComboBox {
+                                    model: root.input-options;
+                                    current-index <=> root.input-index;
+                                    selected => { root.input-chosen(self.current-index); }
+                                }
+                                if root.input-options.length == 0: LineEdit {
+                                    placeholder-text: "Nom exact dans OBS";
+                                    text <=> root.input-text;
+                                    edited(t) => { root.input-typed(t); }
+                                }
+                            }
+                            if root.param-kind == "folder": VerticalLayout {
+                                spacing: 8px;
+                                Label { text: "Dossier à ouvrir"; }
+                                ComboBox {
+                                    model: root.folder-options;
+                                    current-index <=> root.folder-index;
+                                    selected => { root.folder-chosen(self.current-index); }
+                                }
+                                Pill {
+                                    text: "Ouvrir ce dossier  →";
+                                    clicked => { root.open-folder(); }
+                                }
+                            }
+                            if root.param-kind == "coil": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Durée de la pause"; }
+                                ComboBox {
+                                    model: root.coil-options;
+                                    current-index <=> root.coil-index;
+                                    selected => { root.coil-chosen(self.current-index); }
+                                }
+                                Label {
+                                    text: "Appuie après chaque taffe : la touche (et la case « Coil » de l'écran de droite) affiche le compte à rebours. Un appui pendant la pause affiche « ATTENDS ». Petit son à la fin.";
+                                    font-size: 11px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            if root.param-kind == "mediakey": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Touche multimédia"; }
+                                ComboBox {
+                                    model: root.mediakey-options;
+                                    current-index <=> root.mediakey-index;
+                                    selected => { root.mediakey-chosen(self.current-index); }
+                                }
+                                Label { text: "Marche avec Spotify et tout lecteur : Windows envoie la touche à la musique en cours."; font-size: 11px; wrap: word-wrap; }
+                            }
+                            if root.param-kind == "sbaction": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Action Streamer.bot"; }
+                                if root.sb-options.length > 0: ComboBox {
+                                    model: root.sb-options;
+                                    current-index <=> root.sb-index;
+                                    selected => { root.sb-chosen(self.current-index); }
+                                }
+                                if root.sb-options.length == 0: LineEdit {
+                                    placeholder-text: "Nom exact de l'action";
+                                    text <=> root.sb-text;
+                                    edited(t) => { root.sb-typed(t); }
+                                }
+                                Label { text: root.sb-hint; font-size: 11px; wrap: word-wrap; }
+                            }
+                            if root.param-kind == "hotkey": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Touches à envoyer"; }
+                                LineEdit {
+                                    placeholder-text: "ex. ctrl+shift+m";
+                                    text <=> root.hotkey-text;
+                                    edited(t) => { root.hotkey-typed(t); }
+                                }
+                                Hint { text: root.hotkey-hint; error: root.hotkey-error; }
+                                Label {
+                                    text: "Noms : ctrl, shift, alt, win, a-z, 0-9, f1-f24, enter, esc, tab, space, haut/bas/gauche/droite, num0-num9… Astuce : F13 à F24 n'existent sur aucun clavier, parfait pour des raccourcis OBS ou Discord sans conflit.";
+                                    font-size: 11px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            if root.param-kind == "launch": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Programme, fichier, dossier ou adresse web"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    LineEdit {
+                                        placeholder-text: "https://twitch.tv/…  ou  C:\\…\\jeu.exe";
+                                        text <=> root.launch-text;
+                                        edited(t) => { root.launch-typed(t); }
+                                    }
+                                    Pill { text: "Parcourir…"; clicked => { root.launch-browse(); } }
+                                }
+                                Label { text: "Arguments (facultatif)"; }
+                                LineEdit {
+                                    placeholder-text: "ex. --startreplaybuffer";
+                                    text <=> root.launch-args;
+                                    edited(t) => { root.launch-args-typed(t); }
+                                }
+                                Label { text: "Comme un double-clic dans Windows : un site s'ouvre dans ton navigateur, un fichier dans son appli habituelle."; font-size: 11px; wrap: word-wrap; }
+                            }
+                            if root.param-kind == "sound": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Fichier son (mp3, wav, ogg, m4a…)"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    LineEdit {
+                                        placeholder-text: "C:\\…\\bruh.mp3";
+                                        text <=> root.sound-text;
+                                        edited(t) => { root.sound-typed(t); }
+                                    }
+                                    Pill { text: "Parcourir…"; clicked => { root.sound-browse(); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Label { text: "Volume"; vertical-alignment: center; }
+                                    Slider {
+                                        minimum: 0;
+                                        maximum: 100;
+                                        value <=> root.sound-volume;
+                                        released(v) => { root.sound-volume-released(v); }
+                                    }
+                                    Text {
+                                        text: Math.round(root.sound-volume) + " %";
+                                        color: Theme.soft;
+                                        font-size: 12px;
+                                        min-width: 38px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Pill { text: "▶  Écouter"; clicked => { root.sound-test(); } }
+                                Label { text: "Un nouvel appui arrête le son. Il sort sur la sortie audio de Windows : capte-la dans OBS (« Audio du bureau »)."; font-size: 11px; wrap: word-wrap; }
+                            }
+                            if root.param-kind == "countdown": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Durée"; }
+                                ComboBox {
+                                    model: root.countdown-options;
+                                    current-index <=> root.countdown-index;
+                                    selected => { root.countdown-chosen(self.current-index); }
+                                }
+                                Label { text: "Un appui lance le décompte (anneau + temps restant sur la touche), un deuxième l'annule. Petit son et « FINI » à la fin. Idéal pour une pause, un giveaway, un défi…"; font-size: 11px; wrap: word-wrap; }
+                            }
+
+                            if !root.selected-empty: VerticalLayout {
+                                spacing: 8px;
+                                Rectangle { height: 8px; }
+                                Caption { text: "APPARENCE"; }
+                                Label { text: "Texte affiché"; }
+                                LineEdit {
+                                    placeholder-text: "(aucun)";
+                                    text <=> root.key-label;
+                                    edited(t) => { root.label-edited(t); }
+                                }
+
+                                Label { text: "Icône"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Rectangle {
+                                        width: 36px;
+                                        height: 36px;
+                                        border-radius: 10px;
+                                        background: Theme.field;
+                                        border-width: 1px;
+                                        border-color: #ffffff14;
+                                        Image {
+                                            width: 26px;
+                                            height: 26px;
+                                            source: root.icon-preview;
+                                        }
+                                    }
+                                    ComboBox {
+                                        horizontal-stretch: 1;
+                                        model: root.icons;
+                                        current-index <=> root.icon-index;
+                                        selected => { root.icon-chosen(self.current-index); }
+                                    }
+                                }
+                                Text {
+                                    text: "+ Ajouter mes images";
+                                    color: icons-ta.has-hover ? Theme.accent-hover : #7fa6ff;
+                                    font-size: 12px;
+                                    icons-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.open-icons-folder(); }
+                                    }
+                                }
+
+                                Label { text: "Couleur de fond"; }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    for c[i] in root.swatch-colors: Swatch {
+                                        c: c;
+                                        active: root.swatch-values[i] == root.key-color;
+                                        clicked => {
+                                            root.key-color = root.swatch-values[i];
+                                            root.color-edited(root.swatch-values[i]);
+                                        }
+                                    }
+                                }
+                                LineEdit {
+                                    placeholder-text: "#rrggbb (vide = automatique)";
+                                    text <=> root.key-color;
+                                    edited(t) => { root.color-edited(t); }
+                                }
+
+                                Rectangle { height: 10px; }
+                                Pill {
+                                    text: "Vider la touche";
+                                    danger: true;
+                                    clicked => { root.clear-key(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.section == 1: OverlaysPage {
+            vertical-stretch: 1;
+        }
+
+        // ── Barre d'état ──
+        HorizontalLayout {
+            height: 30px;
+            padding-left: 24px;
+            padding-right: 24px;
+            spacing: 8px;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 3px;
+                background: root.status-error ? Theme.danger : Theme.accent;
+            }
+            Text {
+                text: root.status;
+                color: root.status-error ? #ff8a8e : Theme.faint;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if root.official-autostart: Text {
+                text: "Le logiciel officiel SOOMFON démarre aussi avec Windows : le désactiver";
+                color: off-ta.has-hover ? #ffb3b5 : #ff8a8e;
+                font-size: 12px;
+                vertical-alignment: center;
+                off-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.disable-official(); }
+                }
+            }
+            CheckBox {
+                text: "Démarrer avec Windows";
+                checked <=> root.autostart;
+                toggled => { root.autostart-toggled(self.checked); }
+            }
+        }
+    }
+}

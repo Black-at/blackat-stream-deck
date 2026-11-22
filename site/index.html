@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackat Stream Deck</title>
+<meta name="description" content="Logiciel léger et fait maison pour le Stream Deck SOOMFON 15 touches : OBS, musique, Streamer.bot, raccourcis, soundboard, compte à rebours. Gratuit, pour Windows.">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<style>
+  @font-face { font-family: "Inter"; src: url("fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "Inter"; src: url("fonts/Inter-SemiBold.ttf") format("truetype"); font-weight: 600; font-display: swap; }
+  @font-face { font-family: "Inter"; src: url("fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+
+  :root {
+    --bg: #05070d;
+    --night: #0f1c42;
+    --card: rgba(17, 26, 54, .72);
+    --line: rgba(255, 255, 255, .08);
+    --text: #ffffff;
+    --soft: #dbe4ff;
+    --muted: #8ea3cc;
+    --faint: #7487b3;
+    --accent: #3a74ff;
+    --accent-2: #2a52c9;
+    --glow: rgba(58, 116, 255, .55);
+    --ok: #3fb950;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    background-image:
+      radial-gradient(900px 520px at 50% -80px, rgba(47, 95, 255, .28), transparent 70%),
+      linear-gradient(180deg, var(--night) 0%, #080c1a 520px, var(--bg) 1100px);
+    background-repeat: no-repeat;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+
+  /* Neige figée, comme dans le lanceur */
+  .snow { position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      radial-gradient(1.5px 1.5px at 12% 18%, #fff8, transparent 60%),
+      radial-gradient(1px 1px at 28% 62%, #fff6, transparent 60%),
+      radial-gradient(2px 2px at 44% 30%, #fff5, transparent 60%),
+      radial-gradient(1px 1px at 61% 74%, #fff7, transparent 60%),
+      radial-gradient(1.5px 1.5px at 77% 22%, #fff6, transparent 60%),
+      radial-gradient(1px 1px at 89% 58%, #fff8, transparent 60%),
+      radial-gradient(1.5px 1.5px at 6% 84%, #fff5, transparent 60%),
+      radial-gradient(1px 1px at 53% 92%, #fff6, transparent 60%);
+  }
+  main, header, footer { position: relative; z-index: 1; }
+
+  /* En-tête */
+  nav { display: flex; align-items: center; gap: 12px; padding: 18px 0; }
+  nav img { width: 34px; height: 34px; }
+  .brand { font-weight: 700; letter-spacing: 5px; font-size: 15px; }
+  .brand small { display: block; letter-spacing: 0; font-weight: 400; color: var(--muted); font-size: 11px; }
+  nav .spacer { flex: 1; }
+  nav a.link { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 600; padding: 8px 12px; border-radius: 999px; }
+  nav a.link:hover { color: var(--text); background: rgba(255,255,255,.06); }
+
+  /* Héros */
+  .hero { text-align: center; padding: 56px 0 28px; }
+  .logo-big { width: 120px; height: 120px; filter: drop-shadow(0 0 28px var(--glow)); }
+  h1 { font-size: clamp(34px, 6vw, 58px); line-height: 1.08; margin: 22px 0 14px; letter-spacing: -1px; }
+  h1 .grad { background: linear-gradient(90deg, #8fb3ff, #3a74ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--soft); font-size: clamp(16px, 2.2vw, 19px); max-width: 700px; margin: 0 auto; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 26px; border-radius: 999px; font-weight: 700; text-decoration: none; font-size: 15px; transition: transform .12s, background .12s; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.primary { background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 28px var(--glow); }
+  .btn.ghost { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
+  .note { color: var(--faint); font-size: 13px; margin-top: 14px; }
+
+  .shot { margin: 44px auto 0; border-radius: 18px; border: 1px solid var(--line); overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(58,116,255,.12); }
+  .shot img { display: block; width: 100%; height: auto; }
+
+  /* Chiffres */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 40px 0 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; text-align: center; }
+  .stat b { display: block; font-size: 26px; }
+  .stat span { color: var(--muted); font-size: 13px; }
+
+  /* Sections */
+  section { padding: 72px 0 0; }
+  .eyebrow { color: var(--faint); font-size: 12px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; }
+  h2 { font-size: clamp(26px, 4vw, 36px); margin: 6px 0 10px; letter-spacing: -.5px; }
+  .sub { color: var(--muted); max-width: 680px; margin: 0 0 28px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; position: relative; overflow: hidden; }
+  .card::before { content: ""; position: absolute; left: 16px; right: 16px; top: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); }
+  .card h3 { margin: 12px 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .ico { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: rgba(58,116,255,.14); border: 1px solid rgba(58,116,255,.3); }
+  .ico svg { width: 22px; height: 22px; stroke: #b9ceff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tag { position: absolute; top: 18px; right: 18px; font-size: 11px; font-weight: 700; color: #7ee2a8; background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.35); padding: 2px 9px; border-radius: 999px; }
+
+  .split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 28px; align-items: center; }
+  .split .shot { margin: 0; }
+  ul.checks { list-style: none; padding: 0; margin: 0; }
+  ul.checks li { padding: 9px 0 9px 30px; position: relative; color: var(--soft); border-bottom: 1px solid var(--line); }
+  ul.checks li::before { content: ""; position: absolute; left: 0; top: 14px; width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 0 12px var(--glow); }
+  code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .92em; background: rgba(255,255,255,.07); padding: 1px 6px; border-radius: 6px; color: #cfe0ff; }
+
+  .steps { counter-reset: s; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .steps .card { padding-top: 56px; }
+  .steps .card::after { counter-increment: s; content: counter(s); position: absolute; top: 18px; left: 22px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  footer { margin-top: 90px; padding: 28px 0 40px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13px; }
+  footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
+
+  @media (max-width: 900px) {
+    .grid, .steps { grid-template-columns: 1fr 1fr; }
+    .split { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 600px) {
+    .grid, .steps, .duo { grid-template-columns: 1fr; }
+    nav a.link.hide-sm { display: none; }
+    .hero { padding-top: 32px; }
+  }
+</style>
+</head>
+<body>
+<div class="snow" aria-hidden="true"></div>
+
+<header class="wrap">
+  <nav>
+    <img src="img/logo.svg" alt="">
+    <div class="brand">BLACKAT<small>Stream Deck</small></div>
+    <div class="spacer"></div>
+    <a class="link hide-sm" href="#fonctions">Fonctions</a>
+    <a class="link hide-sm" href="#installer">Installer</a>
+    <a class="link" href="https://github.com/Black-at/blackat-stream-deck">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <img class="logo-big" src="img/logo.svg" alt="Logo Blackat">
+    <h1>Ton Stream Deck SOOMFON,<br><span class="grad">enfin léger et utile.</span></h1>
+    <p class="lead">Un logiciel fait maison qui remplace l'appli officielle du SOOMFON 15 touches : OBS, musique, Streamer.bot, raccourcis, soundboard… sans ralentir ton jeu ni ton live.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/Black-at/blackat-stream-deck/releases/latest">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        Télécharger pour Windows
+      </a>
+      <a class="btn ghost" href="https://github.com/Black-at/blackat-stream-deck">Voir le code source</a>
+    </div>
+    <p class="note">Installeur .msi · Windows 10 / 11 · sans droits administrateur · gratuit</p>
+
+    <div class="shot"><img src="img/editeur.webp" width="1480" height="745" alt="L'éditeur Blackat : les 15 touches du boîtier, l'écran latéral et les réglages de la touche sélectionnée"></div>
+
+    <div class="stats">
+      <div class="stat"><b>≈ 9 Mo</b><span>de RAM au repos</span></div>
+      <div class="stat"><b>≈ 0 %</b><span>de CPU au repos</span></div>
+      <div class="stat"><b>18</b><span>types d'actions</span></div>
+      <div class="stat"><b>100 %</b><span>en local, sans compte</span></div>
+    </div>
+  </div>
+
+  <section id="fonctions" class="wrap">
+    <div class="eyebrow">Fonctions</div>
+    <h2>Tout ce qu'il faut pendant un live</h2>
+    <p class="sub">Chaque touche s'affiche avec son icône, son texte et son état réel (REC en rouge, micro coupé, scène active…). Les changements faits dans l'éditeur arrivent sur le boîtier instantanément.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <h3>OBS Studio</h3>
+        <p>Changer de scène, REC et pause, lancer le live, couper un micro, afficher une source, sauvegarder le replay. Connexion automatique.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg></div>
+        <h3>Musique</h3>
+        <p>Lecture, pause, morceau suivant : la commande va au lecteur qui joue (Spotify…), pas au jeu au premier plan. Titre en cours sur l'écran latéral.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H8l-4 4z"/></svg></div>
+        <h3>Streamer.bot</h3>
+        <p>Une touche = une action Streamer.bot : clip, marqueur, message dans le chat… La liste des actions est lue directement.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Nouveau</span>
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></div>
+        <h3>Raccourcis &amp; macros</h3>
+        <p>Envoie <code>ctrl+shift+m</code> à Discord, ou une suite comme <code>ctrl+c, ctrl+v</code>. Les touches F13 à F24 évitent tout conflit.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Nouveau</span>
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></div>
+        <h3>Lancer</h3>
+        <p>Ouvre un jeu, un programme, un dossier ou un site (ta chaîne Twitch, le dashboard…) d'un seul appui.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Nouveau</span>
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9a4 4 0 0 1 0 6"/><path d="M19.5 6.5a8 8 0 0 1 0 11"/></svg></div>
+        <h3>Soundboard</h3>
+        <p>Joue tes sons (mp3, wav, ogg…) avec un volume par touche. Un nouvel appui coupe le son. Plusieurs sons peuvent se superposer.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Nouveau</span>
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M6 2h12M6 22h12"/><path d="M7 2v4a5 5 0 0 0 10 0V2M7 22v-4a5 5 0 0 1 10 0v4"/></svg></div>
+        <h3>Compte à rebours</h3>
+        <p>Pause, giveaway, défi : le temps restant s'affiche sur la touche avec un anneau qui se vide, puis « FINI » et un petit son.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
+        <h3>Écran latéral</h3>
+        <p>L'écran à droite des touches affiche ce que tu veux : morceau en cours, heure, logo, chrono du live, scène OBS active.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h12"/></svg></div>
+        <h3>Dossiers</h3>
+        <p>Range tes touches dans des dossiers (memes, scènes…). Un dossier peut même se remplir tout seul avec tes scènes OBS.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="split">
+      <div class="shot"><img src="img/soundboard.webp" width="1480" height="745" loading="lazy" alt="Réglage d'une touche soundboard dans l'éditeur : fichier son, volume, bouton Écouter"></div>
+      <div>
+        <div class="eyebrow">Éditeur</div>
+        <h2>Tout se règle à la souris</h2>
+        <ul class="checks">
+          <li>Clique une touche, choisis son action dans la liste</li>
+          <li>Icônes fournies, ou tes propres images (PNG, JPG, SVG)</li>
+          <li>10 couleurs de fond ou n'importe quel code <code>#rrggbb</code></li>
+          <li>Aperçu identique au boîtier, enregistrement automatique</li>
+          <li>Démarrage avec Windows en une case à cocher</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="eyebrow">Et aussi</div>
+    <h2>Le kit complet du stream</h2>
+    <p class="sub">Deux outils de plus livrés dans le même installeur.</p>
+    <div class="duo">
+      <div class="card">
+        <div class="shot" style="margin:0 0 16px"><img src="img/overlays.webp" width="1480" height="745" loading="lazy" alt="Onglet Overlays de l'éditeur : liste des overlays, aperçu et réglages"></div>
+        <h3>Overlay Studio</h3>
+        <p>Tes overlays (Starting Soon, BRB, Ending…) réglés sans toucher au code : couleurs, police, textes, animations, avec l'aperçu rendu par OBS.</p>
+      </div>
+      <div class="card" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+        <img src="img/lanceur.webp" width="230" height="315" loading="lazy" alt="Le lanceur Blackat et son bouton Lancer" style="border-radius:14px;border:1px solid var(--line);max-width:100%;height:auto">
+        <div style="flex:1;min-width:200px">
+          <h3>Lanceur Blackat</h3>
+          <p>Un clic sur « Lancer » démarre OBS, Streamer.bot et le Stream Deck dans le bon ordre. Il sait aussi sauvegarder toute ta config dans un pack chiffré pour changer de PC.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="installer" class="wrap">
+    <div class="eyebrow">Installer</div>
+    <h2>Prêt en une minute</h2>
+    <div class="steps">
+      <div class="card">
+        <h3>Télécharge le .msi</h3>
+        <p>Depuis la page <a href="https://github.com/Black-at/blackat-stream-deck/releases/latest">Releases</a> du projet. Pas besoin de droits administrateur.</p>
+      </div>
+      <div class="card">
+        <h3>Lance l'installation</h3>
+        <p>L'installeur n'est pas signé : si Windows affiche « Windows a protégé votre ordinateur », clique <b>Informations complémentaires</b> puis <b>Exécuter quand même</b>.</p>
+      </div>
+      <div class="card">
+        <h3>Ferme l'appli officielle</h3>
+        <p>Le logiciel SOOMFON d'origine ne doit pas tourner en même temps. Ouvre ensuite <b>Soomfon-Deck</b> depuis le menu Démarrer pour régler tes touches.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="eyebrow">Sous le capot</div>
+    <h2>Écrit en Rust, pensé pour le jeu</h2>
+    <p class="sub">Le pilote du boîtier tourne en arrière-plan sans fenêtre et ne fait rien tant qu'on n'appuie pas sur une touche. Seules les touches qui changent sont renvoyées au boîtier. Interface en Slint, aucun navigateur embarqué, aucune télémétrie. Compatible avec le SOOMFON 15 touches (USB <code>5548:6670</code>).</p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Blackat Stream Deck · projet personnel, non affilié à SOOMFON.</span>
+    <span><a href="https://github.com/Black-at/blackat-stream-deck">Code source sur GitHub</a> · police Inter (licence OFL)</span>
+  </div>
+</footer>
+</body>
+</html>

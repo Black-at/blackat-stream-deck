@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  soomfon-deck — configuration
+#  Ce fichier est relu automatiquement à chaque enregistrement : pas besoin de
+#  redémarrer. En cas d'erreur, l'ancienne config reste active et l'erreur est
+#  écrite dans soomfon-deck.log (même dossier).
+#
+#  Positions des touches (pos) :
+#      0   1   2   3   4
+#      5   6   7   8   9
+#     10  11  12  13  14   ← dans un dossier, 14 = Retour (automatique)
+#
+#  Icônes : chemin dans resources/icons (ex. "obs/record.svg") ou chemin complet.
+#  Couleur : "#rrggbb" (facultatif).
+# ─────────────────────────────────────────────────────────────────────────────
+
+brightness = 70      # 0 à 100
+jpeg_quality = 80    # 30 à 100 (plus bas = changement de page plus rapide)
+side = ["music", "clock", "logo"]    # écran de droite, de haut en bas : music, clock, logo, stream_timer, scene, none
+
+# Connexion OBS : rien à remplir, les réglages sont lus dans OBS
+# (Outils → Paramètres du serveur WebSocket). Décommente pour forcer :
+# [obs]
+# host = "127.0.0.1"
+# port = 4455
+# password = "..."
+
+# ── Page racine (toujours la première) ──────────────────────────────────────
+[[page]]
+id = "racine"
+keys = [
+  { pos = 0, icon = "obs/record.svg", label = "REC", action = { type = "obs_record" } },
+  { pos = 1, icon = "obs/record-pause.svg", label = "Pause REC", action = { type = "obs_record_pause" } },
+  { pos = 2, icon = "obs/live.svg", label = "LIVE", action = { type = "obs_stream" } },
+  { pos = 3, icon = "misc/timer.svg", action = { type = "stream_timer" } },
+  { pos = 4, icon = "obs/replay-buffer.svg", label = "Replay", action = { type = "obs_replay_save" } },
+
+  { pos = 5, icon = "obs/scene.svg", label = "Scènes", color = "#1f3f7a", action = { type = "obs_scenes_folder" } },
+  { pos = 6, icon = "misc/meme.svg", label = "Memes", color = "#5a2a7a", action = { type = "folder", page = "memes" } },
+
+  # Remplace "Mic/Aux" par le nom exact de ta source micro dans OBS :
+  { pos = 10, icon = "obs/mic.svg", label = "Micro", action = { type = "obs_mute", input = "Mic/Aux" } },
+  { pos = 11, icon = "obs/speaker.svg", label = "Bureau", action = { type = "obs_mute", input = "Audio du bureau" } },
+]
+
+# ── Dossier Memes ───────────────────────────────────────────────────────────
+# Chaque meme = une source média dans OBS (son ou vidéo). La touche la relance.
+[[page]]
+id = "memes"
+keys = [
+  # { pos = 0, icon = "misc/meme.svg", label = "Bruh", action = { type = "obs_media", input = "Bruh" } },
+]
+
+# Autres actions possibles :
+#   { type = "obs_scene", scene = "Gameplay" }
+#   { type = "obs_source", scene = "Gameplay", source = "Webcam" }
+#   { type = "folder", page = "autre-dossier" }   (seulement depuis la racine)
+#   { type = "hotkey", keys = "ctrl+shift+m" }     (raccourci ; macro : "ctrl+c, ctrl+v")
+#   { type = "launch", target = "https://twitch.tv" }   (programme, fichier, dossier ou site)
+#   { type = "sound", file = "C:\\Sons\\bruh.mp3", volume = 80 }   (soundboard, 0 à 100)
+#   { type = "countdown", seconds = 300 }          (compte à rebours, nouvel appui = annuler)
+#   { type = "none" }                              (touche décorative)

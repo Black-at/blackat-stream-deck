@@ -27,7 +27,7 @@ toml = "1"
 
 # Pilotage direct du lecteur de musique (Spotify…) via les contrôles multimédias de Windows.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Media_Control", "Foundation_Collections", "Win32_System_Threading", "Win32_Foundation", "Win32_Security", "Win32_System_SystemInformation", "Win32_Media_Audio", "Win32_Media_Multimedia", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Media_Control", "Foundation_Collections", "Win32_System_Threading", "Win32_Foundation", "Win32_Security", "Win32_System_SystemInformation", "Win32_Media_Audio", "Win32_Media_Multimedia"] }
 
 # Binaire le plus petit / rapide possible : c'est le démon qui tournera en permanence.
 [profile.release]

@@ -2,7 +2,7 @@
 
 Logiciel léger et fait maison pour le **Stream Deck SOOMFON 15 touches** (Windows 10/11).
 Il remplace l'appli officielle : OBS, musique, Streamer.bot, raccourcis clavier, soundboard,
-compte à rebours… sans ralentir le jeu ni le live (≈ 9 Mo de RAM et ≈ 0 % de CPU au repos).
+compte à rebours… sans ralentir le jeu ni le live (≈ 7 Mo de RAM dans le Gestionnaire des tâches et ≈ 0 % de CPU au repos).
 
 **Site de présentation :** https://black-at.github.io/blackat-stream-deck/
 **Télécharger :** page *Releases* du dépôt → `Soomfon-Deck-<version>.msi`.

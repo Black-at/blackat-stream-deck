@@ -64,32 +64,62 @@ pub fn open(target: &str, args: &str) {
     });
 }
 
+/// `ShellExecuteW` de shell32.dll.
+#[cfg(windows)]
+type ShellExecuteFn = unsafe extern "system" fn(isize, *const u16, *const u16, *const u16, *const u16, i32) -> isize;
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn LoadLibraryW(name: *const u16) -> isize;
+    fn GetProcAddress(module: isize, name: *const u8) -> *const core::ffi::c_void;
+}
+
+/// shell32.dll pèse ~8 Mo en mémoire : on ne la charge qu'au premier appui sur une touche « Lancer »
+/// (l'importer normalement la chargerait au démarrage du démon, même sans touche « Lancer »).
+#[cfg(windows)]
+fn shell_execute() -> Option<ShellExecuteFn> {
+    use std::sync::OnceLock;
+    static FN: OnceLock<Option<usize>> = OnceLock::new();
+    let addr = FN.get_or_init(|| {
+        let name: Vec<u16> = "shell32.dll\0".encode_utf16().collect();
+        // SAFETY : chaînes terminées par un zéro ; la bibliothèque reste chargée jusqu'à la fin.
+        unsafe {
+            let module = LoadLibraryW(name.as_ptr());
+            if module == 0 {
+                return None;
+            }
+            let f = GetProcAddress(module, c"ShellExecuteW".as_ptr().cast());
+            (!f.is_null()).then_some(f as usize)
+        }
+    });
+    // SAFETY : adresse de ShellExecuteW, dont la signature est celle de ShellExecuteFn.
+    addr.map(|a| unsafe { std::mem::transmute::<usize, ShellExecuteFn>(a) })
+}
+
 #[cfg(windows)]
 fn shell_open(target: &str, args: &str) -> Result<(), String> {
-    use windows::{
-        Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
-        core::{HSTRING, PCWSTR, w},
-    };
-    let file = HSTRING::from(target);
-    let params = HSTRING::from(args);
+    const SW_SHOWNORMAL: i32 = 1;
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let exec = shell_execute().ok_or("shell32.dll introuvable")?;
+    let (verb, file, params) = (wide("open"), wide(target), wide(args));
     // Dossier de travail = dossier du programme (sinon certains, comme OBS, ne trouvent pas leurs fichiers).
     let dir = Path::new(target)
         .parent()
         .filter(|p| classify(target) == Target::Program && p.is_dir())
-        .map(|p| HSTRING::from(p.as_os_str()));
-    // SAFETY : chaînes valides pendant l'appel ; ShellExecuteW ne les garde pas.
+        .map(|p| wide(&p.to_string_lossy()));
+    // SAFETY : chaînes UTF-16 terminées par un zéro, valides pendant l'appel ; ShellExecuteW ne les garde pas.
     let code = unsafe {
-        ShellExecuteW(
-            None,
-            w!("open"),
-            &file,
-            if args.is_empty() { PCWSTR::null() } else { PCWSTR(params.as_ptr()) },
-            dir.as_ref().map(|d| PCWSTR(d.as_ptr())).unwrap_or(PCWSTR::null()),
+        exec(
+            0,
+            verb.as_ptr(),
+            file.as_ptr(),
+            if args.is_empty() { std::ptr::null() } else { params.as_ptr() },
+            dir.as_ref().map(|d| d.as_ptr()).unwrap_or(std::ptr::null()),
             SW_SHOWNORMAL,
         )
     };
     // Valeur > 32 = succès (convention historique de ShellExecute).
-    let code = code.0 as isize;
     match code {
         c if c > 32 => Ok(()),
         2 => Err("fichier introuvable".into()),
@@ -115,6 +145,12 @@ mod tests {
         assert_eq!(short_name("www.youtube.com"), "Youtube");
         assert_eq!(short_name(r"C:\Program Files\obs-studio\bin\64bit\obs64.exe"), "obs64");
         assert_eq!(short_name(r"C:\Clips\gg.mp4"), "gg");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn shell32_charge_a_la_demande() {
+        assert!(shell_execute().is_some());
     }
 
     #[test]

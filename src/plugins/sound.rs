@@ -99,6 +99,24 @@ fn toggle(file: &str, volume: u8) {
 #[cfg(not(windows))]
 fn toggle(_file: &str, _volume: u8) {}
 
+/// Petit son système (fin d'un compte à rebours).
+#[cfg(windows)]
+pub fn chime() {
+    use windows::{
+        Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT},
+        core::HSTRING,
+    };
+    let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+    let file = HSTRING::from(format!(r"{windir}\Media\Windows Notify System Generic.wav"));
+    // SAFETY : chaîne valide le temps de l'appel ; lecture asynchrone gérée par Windows.
+    unsafe {
+        let _ = PlaySoundW(&file, None, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn chime() {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

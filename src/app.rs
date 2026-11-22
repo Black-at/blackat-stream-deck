@@ -17,19 +17,26 @@ use tokio::{sync::mpsc::UnboundedSender, time::Instant};
 
 use crate::{
     clock,
-    coil::{self, Coil, Press},
     config::{Action, Config, KeyConfig, SideWidget},
     device::{DeviceHandle, Frame},
     layout::{BACK_POS, KEYS, SLOTS},
     media::{self, NowPlaying},
     obs::{ObsCommand, ObsUpdate, Snapshot, WatchList},
     plugins::{
+        counter::Counters,
         countdown::{self, Countdowns},
-        hotkey, launch, sound,
+        hotkey, launch,
+        mic::Mic,
+        sound,
+        system::Sampler,
+        text,
     },
     streamerbot::SbCommand,
     render::{KeyImage, KeyVisual, Renderer},
-    visuals::{ACTIVE_RED, PAUSED_AMBER, SideState, back_visual, base_visual, coil_visual, countdown_visual, side_visual},
+    visuals::{
+        ACTIVE_RED, PAUSED_AMBER, SideState, back_visual, base_visual, counter_visual, countdown_visual, mic_visual,
+        side_visual, system_visual,
+    },
 };
 
 /// Tout ce qui peut réveiller la boucle principale.
@@ -85,8 +92,11 @@ pub struct App {
     music: Option<NowPlaying>,
     /// Vrai si une case de l'écran latéral affiche la musique (le suivi ne tourne qu'alors).
     music_wanted: Arc<AtomicBool>,
-    coil: Coil,
     countdowns: Countdowns,
+    counters: Counters,
+    mic: Mic,
+    /// Charge du PC, mesurée chaque seconde seulement quand elle est affichée.
+    system: Sampler,
 }
 
 impl App {
@@ -98,7 +108,7 @@ impl App {
     ) -> Self {
         let renderer = Renderer::new(icons_dir.clone(), cfg.jpeg_quality);
         let music_wanted = Arc::new(AtomicBool::new(cfg.side.contains(&SideWidget::Music)));
-        let app = Self {
+        let mut app = Self {
             cfg,
             renderer,
             icons_dir,
@@ -110,10 +120,13 @@ impl App {
             sb_ok: false,
             music: None,
             music_wanted,
-            coil: Coil::load(crate::config::app_dir().join("coil.json")),
             countdowns: Countdowns::default(),
+            counters: Counters::load(&crate::config::app_dir()),
+            mic: Mic::default(),
+            system: Sampler::default(),
         };
         app.send_watch_list();
+        app.update_watchers();
         app
     }
 
@@ -143,14 +156,16 @@ impl App {
     pub fn needs_tick(&self) -> bool {
         let side = |w: SideWidget| self.cfg.side.contains(&w);
         side(SideWidget::Clock)
-            || self.coil.active(Instant::now())
             || self.countdowns.active()
+            || self.shows_system()
+            || self.shows_mic()
             || (self.obs.stream_active
                 && (side(SideWidget::StreamTimer)
                     || self.current_keys().iter().any(|k| matches!(k.action, Action::StreamTimer))))
     }
 
     pub fn handle(&mut self, event: AppEvent) {
+        let page = self.page;
         match event {
             AppEvent::Key(pos) => self.on_key(pos),
             AppEvent::DeviceConnected => log::debug!("Boîtier prêt"),
@@ -160,20 +175,43 @@ impl App {
             AppEvent::Streamerbot(ok) => self.sb_ok = ok,
             AppEvent::Music(now) => self.music = now,
         }
+        if self.page != page {
+            self.update_watchers();
+        }
         self.redraw();
     }
 
     /// Battement du chrono (1 Hz).
     pub fn tick(&mut self) {
-        if self.coil.tick(Instant::now()) {
-            log::info!("Coil : pause terminée");
-            coil::chime();
-        }
         if self.countdowns.tick(Instant::now()) > 0 {
             log::info!("Compte à rebours terminé");
-            coil::chime();
+            sound::chime();
+        }
+        if self.shows_system() {
+            self.system.sample();
         }
         self.redraw();
+    }
+
+    /// La charge du PC est-elle affichée (page courante ou écran latéral) ?
+    fn shows_system(&self) -> bool {
+        self.cfg.side.contains(&SideWidget::System)
+            || self.current_keys().iter().any(|k| matches!(k.action, Action::SystemInfo))
+    }
+
+    /// L'état du micro Windows est-il affiché ?
+    fn shows_mic(&self) -> bool {
+        self.cfg.side.contains(&SideWidget::Mic) || self.current_keys().iter().any(|k| matches!(k.action, Action::MicMute))
+    }
+
+    /// Démarre / met en pause les mesures selon ce qui est affiché (après un changement de page ou de config).
+    fn update_watchers(&mut self) {
+        self.mic.set_wanted(self.shows_mic());
+        if !self.shows_system() {
+            self.system.reset();
+        } else if self.system.current().is_none() {
+            self.system.sample();
+        }
     }
 
     // ── Appuis ──────────────────────────────────────────────────────────────
@@ -205,10 +243,6 @@ impl App {
             Action::ObsSource { scene, source } => self.send(ObsCommand::ToggleSource { scene, source }),
             Action::ObsReplaySave => self.send(ObsCommand::SaveReplay),
             Action::Media { key } => media::press(key),
-            Action::Coil { seconds } => match self.coil.press(seconds, Instant::now()) {
-                Press::Started => log::info!("Coil : taffe, pause de {seconds} s"),
-                Press::Wait => log::debug!("Coil : pause en cours, attends"),
-            },
             Action::Streamerbot { action } => {
                 if action.trim().is_empty() {
                     log::warn!("Touche Streamer.bot sans action choisie");
@@ -224,6 +258,13 @@ impl App {
                     self.countdowns.press((page, pos), seconds, Instant::now());
                 }
             }
+            Action::Text { text, enter } => text::type_text(&text, enter),
+            Action::Counter { name, step } => {
+                let value = self.counters.press(&name, step);
+                log::info!("Compteur « {} » : {value}", name.trim());
+            }
+            Action::MicMute => self.mic.toggle(),
+            Action::SystemInfo => {}
         }
     }
 
@@ -306,6 +347,7 @@ impl App {
         });
         self.cfg = cfg;
         self.send_watch_list();
+        self.update_watchers();
     }
 
     /// Indique à la tâche OBS quelles entrées / sources suivre.
@@ -391,7 +433,10 @@ impl App {
             scene: o.program_scene.as_deref(),
             obs_connected: o.connected,
             time: clock::now(),
-            coil: self.coil.view(Instant::now()),
+            system: self.system.current(),
+            mic_muted: self.mic.muted(),
+            record_active: o.record_active,
+            record_paused: o.record_paused,
         };
         side_visual(widget, &state)
     }
@@ -434,15 +479,9 @@ impl App {
             Action::ObsReplaySave => v.dim |= !o.replay_active,
             // Streamer.bot fermé : l'action ne pourrait pas partir.
             Action::Streamerbot { .. } => v.dim = !self.sb_ok,
-            Action::Coil { seconds } => {
-                let label = key.label.clone().unwrap_or_else(|| format!("{seconds} s"));
-                let mut c = coil_visual(&self.coil.view(Instant::now()), Some((&label, key.icon.as_deref())));
-                if c.dial.is_none() {
-                    // Au repos : la couleur choisie dans l'éditeur reste celle de la touche.
-                    c.bg = v.bg;
-                }
-                return c;
-            }
+            Action::Counter { name, .. } => return counter_visual(v, name, self.counters.get(name)),
+            Action::MicMute => return mic_visual(self.mic.muted(), Some(v)),
+            Action::SystemInfo => return system_visual(self.system.current(), v.bg),
             Action::Countdown { seconds } => {
                 let view = match self.page_index() {
                     Some(page) => self.countdowns.view((page, key.pos), Instant::now()),

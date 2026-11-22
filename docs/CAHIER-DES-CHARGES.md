@@ -20,6 +20,7 @@ Décisions validées le 2026-11-09.
 | OBS | Scènes, enregistrement, direct, et **memes = sources média OBS** déclenchées (pas d'audio dans l'app). |
 | Autres actions | Toutes retenues : raccourcis clavier, muet Discord, Spotify, marqueurs/clips Twitch, lancement d'applis. |
 | Plugins (2026-11-22) | Ajoutés : **raccourci clavier / macro**, **lancer** (appli, site, fichier), **soundboard** (l'app joue désormais des sons, via le lecteur MCI de Windows, sans bibliothèque audio) et **compte à rebours**. Code dans `src/plugins/`. |
+| Plugins (2026-11-22, suite) | **Coil retiré** (ses touches disparaissent des anciennes configs au chargement). Ajoutés : **taper un texte**, **compteur**, **micro Windows**, **infos PC** ; écran latéral : **état OBS**, **charge du PC**, **micro**. Choix des plugins dans l'éditeur : panneau par catégories avec recherche. Installeur refait par GitHub à chaque envoi de code. |
 | Retour visuel | Oui : scène active en surbrillance, REC/LIVE, **chrono du live**. |
 | Dossiers | **1 seul niveau** : page racine → dossier. Pas de dossier dans un dossier. |
 | Touche Retour | **En bas à droite**, fixe dans chaque dossier (14 actions + Retour). |

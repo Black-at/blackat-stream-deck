@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "blackat-launcher"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "image",
  "serde",
@@ -4859,7 +4859,7 @@ dependencies = [
 
 [[package]]
 name = "soomfon-deck"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ab_glyph",
  "async-hid",
@@ -4883,7 +4883,7 @@ dependencies = [
 
 [[package]]
 name = "soomfon-editor"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "image",

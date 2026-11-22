@@ -36,11 +36,11 @@ pub struct KeyVisual {
     /// Bloc de texte sur plusieurs lignes (écran latéral : musique, heure…). S'il est présent,
     /// il remplace libellé et grand texte ; l'icône, petite, se place au-dessus.
     pub lines: Vec<TextLine>,
-    /// Cadran circulaire (Coil), dessiné sous le texte.
+    /// Cadran circulaire (compte à rebours), dessiné sous le texte.
     pub dial: Option<Dial>,
 }
 
-/// Cadran de 60 graduations à la façon de l'appli Coil.
+/// Cadran de 60 graduations (anneau qui se vide).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Dial {
     /// Graduations allumées (0 à 60), dans le sens des aiguilles d'une montre depuis midi.
@@ -556,27 +556,30 @@ mod tests {
             }),
             ("logo", KeyVisual { bg: [5, 7, 13], icon: Some("misc/blackat.svg".into()), ..Default::default() }),
         ];
-        let view = |remaining: Option<u32>, progress: f32, waiting: bool, ready: bool| crate::coil::CoilView {
-            remaining,
-            progress,
-            heat: if remaining.is_some() { 1.0 - progress } else { 0.0 },
-            today: 7,
-            waiting,
-            ready,
-            phase: 3,
-        };
-        let coil = [
-            ("coil-chaud", crate::visuals::coil_visual(&view(Some(27), 0.1, false, false), None)),
-            ("coil-tiede", crate::visuals::coil_visual(&view(Some(14), 0.55, false, false), None)),
-            ("coil-attends", crate::visuals::coil_visual(&view(Some(20), 0.35, true, false), None)),
-            ("coil-pret", crate::visuals::coil_visual(&view(None, 1.0, false, true), None)),
-            ("coil-touche", crate::visuals::coil_visual(&view(None, 1.0, false, false), Some(("15 s", None)))),
+        use crate::{plugins::{countdown::View, system::Stats}, visuals::*};
+        let stats = Some(Stats { cpu: 37, ram: 58, ram_used_gb: 9.2, ram_total_gb: 16.0 });
+        let extra = [
+            ("infos-pc", system_visual(stats, [10, 14, 26])),
+            ("micro-coupe", mic_visual(Some(true), None)),
+            ("micro-actif", mic_visual(Some(false), None)),
+            ("compteur", counter_visual(KeyVisual { bg: [90, 42, 122], ..Default::default() }, "Morts", 12)),
+            ("decompte", countdown_visual(KeyVisual::blank(), View::Running { left: 184, progress: 0.4 }, 300)),
+            ("decompte-fini", countdown_visual(KeyVisual::blank(), View::Done, 300)),
         ];
-        let cases = cases.into_iter().chain(coil);
+        let cases = cases.into_iter().chain(extra);
         for (name, v) in cases {
             let img = r.preview(&v);
             let big = image::imageops::resize(&img, 255, 255, FilterType::Nearest);
             big.save(Path::new(&dir).join(format!("{name}.png"))).unwrap();
+        }
+    }
+
+    /// Les symboles utilisés sur les touches existent bien dans la police Inter.
+    #[test]
+    fn symboles_dans_la_police() {
+        let font = load_font().unwrap();
+        for c in ['●', '○', '…', '−', 'é', 'É', 'à', '%'] {
+            assert_ne!(font.glyph_id(c).0, 0, "{c}");
         }
     }
 

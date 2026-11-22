@@ -19,14 +19,16 @@ use std::{
 use slint::{Color, ComponentHandle, Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel};
 use soomfon_deck::{
     clock,
-    coil::CoilView,
     config::{self, Action, Config, KeyConfig, ObsConfig, Page, SideWidget, StreamerbotConfig, parse_color},
     media::MediaKey,
     layout::{BACK_POS, KEYS, SIDE},
     render::{KeyVisual, PreviewImage, Renderer, list_icons},
     media::NowPlaying,
-    plugins::{countdown, hotkey, launch, sound},
-    visuals::{SWATCHES, SideState, back_visual, base_visual, side_label, side_visual},
+    plugins::{counter, countdown, hotkey, launch, sound, system::Stats},
+    visuals::{
+        DEFAULT_BG, SCENE_BG, SWATCHES, SideState, back_visual, base_visual, counter_visual, countdown_visual, mic_visual,
+        side_label, side_visual, system_visual,
+    },
 };
 
 slint::include_modules!();
@@ -53,39 +55,103 @@ enum Kind {
     ScenesFolder,
     MusicKey,
     Streamerbot,
-    Coil,
     Hotkey,
     Launch,
     Sound,
     Countdown,
+    Text,
+    Counter,
+    MicMute,
+    SystemInfo,
     Decor,
 }
 
-const KINDS: [(Kind, &str); 20] = [
-    (Kind::Empty, "— Touche vide —"),
-    (Kind::Scene, "OBS · Changer de scène"),
-    (Kind::Record, "OBS · Enregistrer (démarrer / arrêter)"),
-    (Kind::RecordPause, "OBS · Pause de l'enregistrement"),
-    (Kind::Stream, "OBS · Live (démarrer / arrêter)"),
-    (Kind::Media, "OBS · Jouer un média (meme, son…)"),
-    (Kind::Mute, "OBS · Couper / rétablir un son"),
-    (Kind::Source, "OBS · Afficher / masquer une source"),
-    (Kind::Replay, "OBS · Sauvegarder le replay"),
-    (Kind::Timer, "Chrono du live"),
-    (Kind::Folder, "Ouvrir un dossier"),
-    (Kind::ScenesFolder, "Dossier automatique des scènes OBS"),
-    (Kind::MusicKey, "Musique · Lecture, pistes, volume"),
-    (Kind::Streamerbot, "Streamer.bot · Lancer une action"),
-    (Kind::Coil, "Coil · Pause entre deux taffes"),
-    (Kind::Hotkey, "Clavier · Raccourci / macro"),
-    (Kind::Launch, "Lancer une appli, un site, un fichier"),
-    (Kind::Sound, "Soundboard · Jouer un son"),
-    (Kind::Countdown, "Compte à rebours"),
-    (Kind::Decor, "Décoration (aucune action)"),
+/// Catégories du panneau « Choisir une action ».
+const CATS: [&str; 7] = ["OBS", "Live & temps", "Musique & son", "Clavier & applis", "Compteurs & infos", "Streamer.bot", "Navigation"];
+
+/// Un plugin du panneau : type, nom, description courte, catégorie (index dans CATS).
+struct Plugin {
+    kind: Kind,
+    name: &'static str,
+    desc: &'static str,
+    cat: usize,
+}
+
+const fn plugin(kind: Kind, name: &'static str, desc: &'static str, cat: usize) -> Plugin {
+    Plugin { kind, name, desc, cat }
+}
+
+const PLUGINS: [Plugin; 22] = [
+    plugin(Kind::Scene, "Changer de scène", "Passe en direct sur la scène choisie", 0),
+    plugin(Kind::Record, "Enregistrer", "Démarre / arrête l'enregistrement", 0),
+    plugin(Kind::RecordPause, "Pause REC", "Met en pause / reprend l'enregistrement", 0),
+    plugin(Kind::Stream, "Live", "Démarre / arrête le live", 0),
+    plugin(Kind::Media, "Jouer un média", "Relance une source média d'OBS (meme…)", 0),
+    plugin(Kind::Mute, "Couper un son OBS", "Coupe / rétablit une entrée audio d'OBS", 0),
+    plugin(Kind::Source, "Afficher / masquer", "Montre ou cache une source dans une scène", 0),
+    plugin(Kind::Replay, "Sauver le replay", "Enregistre les dernières secondes (replay buffer)", 0),
+    plugin(Kind::ScenesFolder, "Dossier des scènes", "Dossier rempli tout seul avec tes scènes OBS", 0),
+    plugin(Kind::Timer, "Chrono du live", "Durée du live affichée sur la touche", 1),
+    plugin(Kind::Countdown, "Compte à rebours", "Pause, giveaway… avec un son à la fin", 1),
+    plugin(Kind::MusicKey, "Musique", "Lecture, pistes, volume de Windows", 2),
+    plugin(Kind::Sound, "Soundboard", "Joue un son mp3, wav, ogg…", 2),
+    plugin(Kind::MicMute, "Micro Windows", "Coupe le micro pour toutes les applis", 2),
+    plugin(Kind::Hotkey, "Raccourci / macro", "Envoie ctrl+shift+m, F13, une suite…", 3),
+    plugin(Kind::Text, "Taper un texte", "Écrit un message tout prêt (chat…)", 3),
+    plugin(Kind::Launch, "Lancer", "Ouvre une appli, un jeu, un site, un dossier", 3),
+    plugin(Kind::Counter, "Compteur", "+1, −1 ou zéro ; lisible dans OBS", 4),
+    plugin(Kind::SystemInfo, "Infos PC", "Charge du processeur et de la mémoire", 4),
+    plugin(Kind::Streamerbot, "Action Streamer.bot", "Clip, marqueur, message dans le chat…", 5),
+    plugin(Kind::Folder, "Ouvrir un dossier", "Range d'autres touches dans un dossier", 6),
+    plugin(Kind::Decor, "Décoration", "Image ou texte, sans action", 6),
 ];
 
-/// Durées de pause proposées pour Coil (comme dans l'appli : 15 s, 30 s ou perso).
-const COIL_DURATIONS: [u32; 7] = [10, 15, 20, 30, 45, 60, 90];
+fn plugin_of(kind: Kind) -> Option<&'static Plugin> {
+    PLUGINS.iter().find(|p| p.kind == kind)
+}
+
+/// Action d'exemple d'un type (paramètres vides) : icône et texte par défaut, aperçus.
+fn sample_action(kind: Kind) -> Action {
+    match kind {
+        Kind::Scene => Action::ObsScene { scene: String::new() },
+        Kind::Record => Action::ObsRecord,
+        Kind::RecordPause => Action::ObsRecordPause,
+        Kind::Stream => Action::ObsStream,
+        Kind::Media => Action::ObsMedia { input: String::new() },
+        Kind::Mute => Action::ObsMute { input: String::new() },
+        Kind::Source => Action::ObsSource { scene: String::new(), source: String::new() },
+        Kind::Replay => Action::ObsReplaySave,
+        Kind::Timer => Action::StreamTimer,
+        Kind::Folder => Action::Folder { page: String::new() },
+        Kind::ScenesFolder => Action::ObsScenesFolder,
+        Kind::MusicKey => Action::Media { key: MediaKey::PlayPause },
+        Kind::Streamerbot => Action::Streamerbot { action: String::new() },
+        Kind::Hotkey => Action::Hotkey { keys: String::new() },
+        Kind::Launch => Action::Launch { target: String::new(), args: String::new() },
+        Kind::Sound => Action::Sound { file: String::new(), volume: sound::DEFAULT_VOLUME },
+        Kind::Countdown => Action::Countdown { seconds: 300 },
+        Kind::Text => Action::Text { text: String::new(), enter: true },
+        Kind::Counter => Action::Counter { name: "Morts".into(), step: 1 },
+        Kind::MicMute => Action::MicMute,
+        Kind::SystemInfo => Action::SystemInfo,
+        Kind::Decor | Kind::Empty => Action::None,
+    }
+}
+
+/// Exemple de charge du PC pour les aperçus de l'éditeur (la vraie mesure est celle du démon).
+const SAMPLE_STATS: Stats = Stats { cpu: 23, ram: 48, ram_used_gb: 7.7, ram_total_gb: 16.0 };
+
+/// Aperçu d'une touche, au plus près de ce qu'affiche le boîtier.
+fn preview_visual(k: &KeyConfig, counters: &counter::Counters) -> KeyVisual {
+    let v = base_visual(k);
+    match &k.action {
+        Action::Countdown { seconds } => countdown_visual(v, countdown::View::Idle, *seconds),
+        Action::Counter { name, .. } => counter_visual(v, name, counters.get(name)),
+        Action::MicMute => mic_visual(Some(false), Some(v)),
+        Action::SystemInfo => system_visual(Some(SAMPLE_STATS), v.bg),
+        _ => v,
+    }
+}
 
 fn kind_of(a: &Action) -> Kind {
     match a {
@@ -102,7 +168,10 @@ fn kind_of(a: &Action) -> Kind {
         Action::ObsScenesFolder => Kind::ScenesFolder,
         Action::Media { .. } => Kind::MusicKey,
         Action::Streamerbot { .. } => Kind::Streamerbot,
-        Action::Coil { .. } => Kind::Coil,
+        Action::Text { .. } => Kind::Text,
+        Action::Counter { .. } => Kind::Counter,
+        Action::MicMute => Kind::MicMute,
+        Action::SystemInfo => Kind::SystemInfo,
         Action::Hotkey { .. } => Kind::Hotkey,
         Action::Launch { .. } => Kind::Launch,
         Action::Sound { .. } => Kind::Sound,
@@ -120,7 +189,10 @@ fn param_kind(k: Kind) -> &'static str {
         Kind::Folder => "folder",
         Kind::MusicKey => "mediakey",
         Kind::Streamerbot => "sbaction",
-        Kind::Coil => "coil",
+        Kind::Text => "text",
+        Kind::Counter => "counter",
+        Kind::MicMute => "mic",
+        Kind::SystemInfo => "system",
         Kind::Hotkey => "hotkey",
         Kind::Launch => "launch",
         Kind::Sound => "sound",
@@ -145,7 +217,10 @@ fn default_icon(a: &Action) -> Option<String> {
         Action::ObsScenesFolder => "obs/scene.svg",
         Action::Media { key } => key.default_look().1,
         Action::Streamerbot { .. } => "apps/streamerbot.png",
-        Action::Coil { .. } => "misc/coil.svg",
+        Action::Text { .. } => "misc/text.svg",
+        Action::Counter { .. } => "misc/counter.svg",
+        Action::MicMute => "obs/mic.svg",
+        Action::SystemInfo => "misc/cpu.svg",
         Action::Hotkey { .. } => "misc/keyboard.svg",
         Action::Launch { .. } => "misc/launch.svg",
         Action::Sound { .. } => "misc/soundboard.svg",
@@ -169,7 +244,14 @@ fn default_label(a: &Action) -> Option<String> {
         Action::ObsScenesFolder => "Scènes".into(),
         Action::Media { key } => key.default_look().0.to_string(),
         Action::Streamerbot { action } => action.clone(),
-        Action::Coil { seconds } => format!("{seconds} s"),
+        Action::Text { text, .. } if text.trim().is_empty() => "Texte".into(),
+        Action::Text { text, .. } => {
+            let t: String = text.trim().chars().take(12).collect();
+            if text.trim().chars().count() > 12 { format!("{t}…") } else { t }
+        }
+        Action::Counter { name, .. } => name.trim().to_string(),
+        Action::MicMute => "Micro".into(),
+        Action::SystemInfo => return None,
         Action::Hotkey { keys } => {
             let pretty = hotkey::pretty(keys);
             if pretty.is_empty() || pretty.chars().count() > 14 { "Raccourci".into() } else { pretty }
@@ -213,6 +295,12 @@ struct State {
     obs: ObsLists,
     /// Actions proposées pour la page courante (pas de dossier dans un dossier).
     kinds_view: Vec<Kind>,
+    /// Panneau de plugins : catégorie ouverte, recherche, aperçu de chaque plugin (index de PLUGINS).
+    picker_cat: usize,
+    picker_query: String,
+    picker_icons: Vec<Image>,
+    /// Valeurs des compteurs (relues à chaque rafraîchissement : c'est le démon qui les change).
+    counters: counter::Counters,
     /// Options actuellement affichées dans les listes (pour retrouver le choix par index).
     scene_opts: Vec<String>,
     input_opts: Vec<String>,
@@ -381,12 +469,13 @@ fn refresh_pages(ui: &MainWindow, st: &mut State) {
 fn refresh_tiles(ui: &MainWindow, st: &mut State) {
     let folder = st.is_folder();
     let page = st.cfg.pages[st.page].clone();
+    st.counters = counter::Counters::load(&config::app_dir());
     let tiles: Vec<Tile> = (0..KEYS)
         .map(|pos| {
             let (visual, empty, locked) = if folder && pos == BACK_POS {
                 (back_visual(), false, true)
             } else if let Some(k) = page.keys.iter().find(|k| k.pos == pos) {
-                (base_visual(k), false, false)
+                (preview_visual(k, &st.counters), false, false)
             } else {
                 (KeyVisual::blank(), true, false)
             };
@@ -404,8 +493,10 @@ fn refresh_tiles(ui: &MainWindow, st: &mut State) {
         scene: Some(&scene),
         obs_connected: true,
         time: clock::now(),
-        // Coil au repos (« PRÊT ») : le compteur réel du jour est celui du démon.
-        coil: CoilView { remaining: None, progress: 1.0, heat: 0.0, today: 0, waiting: false, ready: false, phase: 0 },
+        system: Some(SAMPLE_STATS),
+        mic_muted: Some(false),
+        record_active: true,
+        record_paused: false,
     };
     let side: Vec<Tile> = (0..SIDE)
         .map(|i| {
@@ -428,23 +519,21 @@ fn refresh_panel(ui: &MainWindow, st: &mut State) {
     }
     ui.set_selected_locked(folder && st.sel == Some(BACK_POS));
 
-    st.kinds_view = KINDS
+    st.kinds_view = PLUGINS
         .iter()
-        .map(|(k, _)| *k)
+        .map(|p| p.kind)
         .filter(|k| !(folder && matches!(k, Kind::Folder | Kind::ScenesFolder)))
         .collect();
-    let names: Vec<String> = st
-        .kinds_view
-        .iter()
-        .map(|k| KINDS.iter().find(|(kk, _)| kk == k).unwrap().1.to_string())
-        .collect();
-    ui.set_action_names(string_model(&names));
-
     let key = st.key().cloned();
     ui.set_selected_empty(key.is_none());
     let kind = key.as_ref().map(|k| kind_of(&k.action)).unwrap_or(Kind::Empty);
-    ui.set_action_index(st.kinds_view.iter().position(|k| *k == kind).unwrap_or(0) as i32);
     ui.set_param_kind(param_kind(kind).into());
+    if let (Some(k), Some(p)) = (&key, plugin_of(kind)) {
+        ui.set_action_name(p.name.into());
+        ui.set_action_category(CATS[p.cat].into());
+        ui.set_action_icon(to_image(st.renderer.preview(&preview_visual(k, &st.counters))));
+    }
+    refresh_picker(ui, st, kind);
 
     // Paramètres de l'action.
     let (scene, input, source, page_target) = match key.as_ref().map(|k| &k.action) {
@@ -481,13 +570,29 @@ fn refresh_panel(ui: &MainWindow, st: &mut State) {
     ui.set_source_text(source.as_str().into());
     st.source_opts = source_opts;
 
-    let coil_labels: Vec<String> = COIL_DURATIONS.iter().map(|s| format!("{s} secondes")).collect();
-    ui.set_coil_options(string_model(&coil_labels));
-    let coil_secs = match key.as_ref().map(|k| &k.action) {
-        Some(Action::Coil { seconds }) => Some(*seconds),
-        _ => None,
+    // Taper un texte, compteur.
+    let (text_value, text_enter) = match key.as_ref().map(|k| &k.action) {
+        Some(Action::Text { text, enter }) => (text.clone(), *enter),
+        _ => (String::new(), true),
     };
-    ui.set_coil_index(coil_secs.and_then(|s| COIL_DURATIONS.iter().position(|x| *x == s)).map(|i| i as i32).unwrap_or(-1));
+    ui.set_text_value(text_value.as_str().into());
+    ui.set_text_enter(text_enter);
+    let (counter_name, counter_step) = match key.as_ref().map(|k| &k.action) {
+        Some(Action::Counter { name, step }) => (name.clone(), *step),
+        _ => (String::new(), 1),
+    };
+    ui.set_counter_name(counter_name.as_str().into());
+    let steps: Vec<String> = counter::STEPS.iter().map(|s| counter::step_label(*s)).collect();
+    ui.set_counter_steps(string_model(&steps));
+    ui.set_counter_step_index(counter::STEPS.iter().position(|s| *s == counter_step).map(|i| i as i32).unwrap_or(-1));
+    let hint = match counter::file_name(&counter_name) {
+        Some(file) => format!(
+            "Valeur actuelle : {}. Pour l'afficher dans OBS : source « Texte (GDI+) » → « Lire depuis un fichier » → %APPDATA%\\soomfon-deck\\compteurs\\{file}.txt. Mets plusieurs touches avec le même nom pour +1, −1 et zéro.",
+            st.counters.get(&counter_name)
+        ),
+        None => "Donne un nom au compteur (ex. Morts, Victoires).".to_string(),
+    };
+    ui.set_counter_hint(hint.into());
 
     let media_labels: Vec<String> = MediaKey::ALL.iter().map(|k| k.label().to_string()).collect();
     ui.set_mediakey_options(string_model(&media_labels));
@@ -573,6 +678,73 @@ fn refresh_panel(ui: &MainWindow, st: &mut State) {
     ui.set_icons(string_model(&st.icons));
     ui.set_icon_index(icon_idx as i32);
     refresh_icon_preview(ui, st, icon);
+}
+
+/// Panneau « Choisir une action » : catégories (avec leur nombre de plugins) et plugins affichés
+/// (catégorie ouverte, ou résultats de la recherche dans toutes les catégories).
+fn refresh_picker(ui: &MainWindow, st: &mut State, current: Kind) {
+    if st.picker_icons.is_empty() {
+        st.picker_icons = PLUGINS
+            .iter()
+            .map(|p| {
+                let action = sample_action(p.kind);
+                let bg = if p.kind == Kind::Scene { SCENE_BG } else { DEFAULT_BG };
+                let visual = KeyVisual { bg, icon: default_icon(&action), ..Default::default() };
+                let visual = match p.kind {
+                    Kind::SystemInfo => system_visual(Some(SAMPLE_STATS), bg),
+                    Kind::Counter => counter_visual(visual, "Morts", 3),
+                    _ => visual,
+                };
+                to_image(st.renderer.preview(&visual))
+            })
+            .collect();
+    }
+    let allowed = |p: &&Plugin| st.kinds_view.contains(&p.kind);
+    let cats: Vec<PickerCat> = CATS
+        .iter()
+        .enumerate()
+        .map(|(i, name)| PickerCat { name: (*name).into(), count: PLUGINS.iter().filter(allowed).filter(|p| p.cat == i).count() as i32 })
+        .collect();
+    let query = fold(&st.picker_query);
+    let items: Vec<PickerItem> = PLUGINS
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| allowed(p))
+        .filter(|(_, p)| {
+            if query.is_empty() {
+                p.cat == st.picker_cat
+            } else {
+                fold(&format!("{} {} {}", p.name, p.desc, CATS[p.cat])).contains(&query)
+            }
+        })
+        .map(|(i, p)| PickerItem {
+            name: p.name.into(),
+            desc: p.desc.into(),
+            icon: st.picker_icons[i].clone(),
+            id: i as i32,
+            current: p.kind == current,
+        })
+        .collect();
+    ui.set_picker_cats(ModelRc::new(VecModel::from(cats)));
+    ui.set_picker_cat(st.picker_cat as i32);
+    ui.set_picker_items(ModelRc::new(VecModel::from(items)));
+}
+
+/// Texte de recherche sans majuscules ni accents (« Écran » trouve « ecran »).
+fn fold(text: &str) -> String {
+    text.trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'à' | 'â' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'î' | 'ï' => 'i',
+            'ô' | 'ö' => 'o',
+            'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            c => c,
+        })
+        .collect()
 }
 
 fn refresh_icon_preview(ui: &MainWindow, st: &mut State, icon: Option<String>) {
@@ -686,6 +858,10 @@ fn main() -> Result<(), slint::PlatformError> {
         side_sel: None,
         obs: ObsLists::default(),
         kinds_view: Vec::new(),
+        picker_cat: 0,
+        picker_query: String::new(),
+        picker_icons: Vec::new(),
+        counters: counter::Counters::load(&config::app_dir()),
         scene_opts: Vec::new(),
         input_opts: Vec::new(),
         source_opts: Vec::new(),
@@ -784,6 +960,20 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             ui.invoke_close_window();
         });
+    }
+    // SOOMFON_EDITOR_PICKER=<catégorie> ouvre le panneau de plugins ; SOOMFON_EDITOR_PICKER_QUERY=<texte> y cherche.
+    if let Some(cat) = std::env::var("SOOMFON_EDITOR_PICKER").ok().and_then(|v| v.parse::<i32>().ok()) {
+        ui.invoke_open_picker();
+        ui.invoke_picker_cat_chosen(cat);
+        if let Ok(q) = std::env::var("SOOMFON_EDITOR_PICKER_QUERY") {
+            ui.set_picker_query(q.as_str().into());
+            ui.invoke_picker_query_edited(q.as_str().into());
+        }
+        // SOOMFON_EDITOR_PICK=<n° du plugin> : comme un clic sur ce plugin (tests).
+        if let Some(id) = std::env::var("SOOMFON_EDITOR_PICK").ok().and_then(|v| v.parse::<i32>().ok()) {
+            ui.invoke_picker_chosen(id);
+            ui.set_picker_open(false);
+        }
     }
     // SOOMFON_EDITOR_SIDE=<0..2> présélectionne une case de l'écran latéral.
     if let Some(i) = std::env::var("SOOMFON_EDITOR_SIDE").ok().and_then(|v| v.parse().ok()) {
@@ -932,9 +1122,12 @@ fn install_callbacks(ui: &MainWindow, ctx: &Ctx) {
 
     // Action
     let c = ctx.clone();
-    ui.on_action_chosen(move |idx| {
+    ui.on_picker_chosen(move |id| {
         c.with(|ui, st| {
-            let (Some(pos), Some(kind)) = (st.sel, st.kinds_view.get(idx as usize).copied()) else { return };
+            let (Some(pos), Some(kind)) = (st.sel, PLUGINS.get(id as usize).map(|p| p.kind)) else { return };
+            if !st.kinds_view.contains(&kind) {
+                return;
+            }
             if kind == Kind::Empty {
                 st.cfg.pages[st.page].keys.retain(|k| k.pos != pos);
             } else {
@@ -965,12 +1158,16 @@ fn install_callbacks(ui: &MainWindow, ctx: &Ctx) {
                     Kind::ScenesFolder => Action::ObsScenesFolder,
                     Kind::MusicKey => Action::Media { key: MediaKey::PlayPause },
                     Kind::Streamerbot => Action::Streamerbot { action: first(&st.obs.sb_actions) },
-                    Kind::Coil => Action::Coil { seconds: 15 },
-                    Kind::Hotkey => Action::Hotkey { keys: String::new() },
-                    Kind::Launch => Action::Launch { target: String::new(), args: String::new() },
-                    Kind::Sound => Action::Sound { file: String::new(), volume: sound::DEFAULT_VOLUME },
-                    Kind::Countdown => Action::Countdown { seconds: 300 },
-                    Kind::Decor | Kind::Empty => Action::None,
+                    Kind::Hotkey
+                    | Kind::Launch
+                    | Kind::Sound
+                    | Kind::Countdown
+                    | Kind::Text
+                    | Kind::Counter
+                    | Kind::MicMute
+                    | Kind::SystemInfo
+                    | Kind::Decor
+                    | Kind::Empty => sample_action(kind),
                 };
                 if st.key_index().is_none() {
                     st.cfg.pages[st.page].keys.push(KeyConfig {
@@ -1060,7 +1257,65 @@ fn install_callbacks(ui: &MainWindow, ctx: &Ctx) {
         })
     });
     let c = ctx.clone();
-    ui.on_coil_chosen(move |i| update_param(&c, |_| Some(Action::Coil { seconds: *COIL_DURATIONS.get(i.max(0) as usize)? })));
+    ui.on_text_typed(move |t| {
+        update_param(&c, |st| match st.key()?.action.clone() {
+            Action::Text { enter, .. } => Some(Action::Text { text: t.to_string(), enter }),
+            _ => None,
+        })
+    });
+    let c = ctx.clone();
+    ui.on_text_enter_toggled(move |on| {
+        update_param(&c, |st| match st.key()?.action.clone() {
+            Action::Text { text, .. } => Some(Action::Text { text, enter: on }),
+            _ => None,
+        })
+    });
+    let c = ctx.clone();
+    ui.on_counter_typed(move |t| {
+        update_param(&c, |st| match st.key()?.action.clone() {
+            Action::Counter { step, .. } => Some(Action::Counter { name: t.to_string(), step }),
+            _ => None,
+        })
+    });
+    let c = ctx.clone();
+    ui.on_counter_step_chosen(move |i| {
+        update_param(&c, |st| match st.key()?.action.clone() {
+            Action::Counter { name, .. } => Some(Action::Counter { name, step: *counter::STEPS.get(i.max(0) as usize)? }),
+            _ => None,
+        })
+    });
+
+    // Panneau de plugins
+    let c = ctx.clone();
+    ui.on_open_picker(move || {
+        c.with(|ui, st| {
+            // S'ouvre sur la catégorie de l'action actuelle (ou la première).
+            let kind = st.key().map(|k| kind_of(&k.action)).unwrap_or(Kind::Empty);
+            st.picker_cat = plugin_of(kind).map(|p| p.cat).unwrap_or(0);
+            st.picker_query.clear();
+            ui.set_picker_query("".into());
+            refresh_picker(ui, st, kind);
+            ui.set_picker_open(true);
+        })
+    });
+    let c = ctx.clone();
+    ui.on_picker_cat_chosen(move |i| {
+        c.with(|ui, st| {
+            st.picker_cat = (i.max(0) as usize).min(CATS.len() - 1);
+            st.picker_query.clear();
+            ui.set_picker_query("".into());
+            let kind = st.key().map(|k| kind_of(&k.action)).unwrap_or(Kind::Empty);
+            refresh_picker(ui, st, kind);
+        })
+    });
+    let c = ctx.clone();
+    ui.on_picker_query_edited(move |t| {
+        c.with(|ui, st| {
+            st.picker_query = t.to_string();
+            let kind = st.key().map(|k| kind_of(&k.action)).unwrap_or(Kind::Empty);
+            refresh_picker(ui, st, kind);
+        })
+    });
     let c = ctx.clone();
     ui.on_mediakey_chosen(move |i| {
         update_param(&c, |_| Some(Action::Media { key: *MediaKey::ALL.get(i.max(0) as usize)? }))

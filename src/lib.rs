@@ -2,7 +2,6 @@
 
 pub mod app;
 pub mod clock;
-pub mod coil;
 pub mod config;
 pub mod device;
 pub mod layout;

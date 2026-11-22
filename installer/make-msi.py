@@ -164,12 +164,16 @@ def build_wxs(ver: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--wix", required=True, type=Path, help="dossier de WiX 3.14 (candle.exe, light.exe)")
+    ap.add_argument("--version", help="version du .msi (ex. 0.3.12) ; par défaut celle de Cargo.toml")
     args = ap.parse_args()
     missing = [e for e in EXES if not (RELEASE / e).is_file()]
     if missing:
         print("Compile d'abord : cargo build --release --workspace (manquant : " + ", ".join(missing) + ")")
         return 1
-    ver = version()
+    ver = args.version or version()
+    if not re.fullmatch(r"\d+\.\d+\.\d+", ver):
+        print(f"Version « {ver} » invalide : attendu 3 nombres, ex. 0.3.12")
+        return 1
     OUT.mkdir(parents=True, exist_ok=True)
     wxs = OUT / "soomfon-deck.wxs"
     wxs.write_text(build_wxs(ver), encoding="utf-8")

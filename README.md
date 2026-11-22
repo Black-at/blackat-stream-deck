@@ -26,8 +26,24 @@ compte à rebours… sans ralentir le jeu ni le live (≈ 7 Mo de RAM dans le Ge
 - **Lancer** : programme, fichier, dossier ou site web
 - **Soundboard** : mp3, wav, ogg, m4a… avec volume par touche ; nouvel appui = stop
 - **Compte à rebours** : anneau + temps restant sur la touche, « FINI » et un son à la fin
-- **Coil** : pause imposée entre deux taffes
+- **Taper un texte** : message tout prêt (chat…), Entrée en option
+- **Compteur** : +1, −1, zéro ; valeur écrite dans `%APPDATA%\soomfon-deck\compteurs\<nom>.txt` pour OBS
+- **Micro Windows** : coupe le micro par défaut pour toutes les applis (touche rouge quand coupé)
+- **Infos PC** : charge du processeur et de la mémoire
 - **Dossiers** (un niveau), touches décoratives
+
+Dans l'éditeur, les plugins sont rangés par catégorie (OBS, Live & temps, Musique & son, Clavier & applis,
+Compteurs & infos, Streamer.bot, Navigation), avec une recherche.
+
+**Écran de droite** (3 cases) : musique en cours, heure, logo, chrono du live, scène OBS, état REC / LIVE,
+charge du PC, micro Windows.
+
+## Installeur automatique
+
+À chaque envoi de code sur `master`, GitHub compile tout, lance les tests, fabrique le `.msi` et le publie
+dans une nouvelle Release (`.github/workflows/release.yml`). Version : `<majeur>.<mineur>` de `Cargo.toml`
++ numéro de construction. Un nouveau PC qui installe depuis *Releases* (ou le bouton du site) a donc toujours
+les derniers plugins.
 
 La configuration est dans `%APPDATA%\soomfon-deck\config.toml` (écrite par l'éditeur, lisible à la main).
 

@@ -57,19 +57,25 @@ pub enum SideWidget {
     StreamTimer,
     /// Scène OBS affichée.
     Scene,
-    /// Coil : cadran de la pause entre deux taffes.
-    Coil,
+    /// Charge du PC : processeur et mémoire.
+    System,
+    /// État d'OBS : enregistrement et live.
+    ObsStatus,
+    /// Micro de Windows : coupé ou actif.
+    Mic,
 }
 
 impl SideWidget {
     /// Ordre proposé dans l'éditeur.
-    pub const ALL: [SideWidget; 7] = [
+    pub const ALL: [SideWidget; 9] = [
         SideWidget::Music,
         SideWidget::Clock,
         SideWidget::Logo,
         SideWidget::StreamTimer,
         SideWidget::Scene,
-        SideWidget::Coil,
+        SideWidget::ObsStatus,
+        SideWidget::System,
+        SideWidget::Mic,
         SideWidget::None,
     ];
 
@@ -81,7 +87,9 @@ impl SideWidget {
             SideWidget::Logo => "logo",
             SideWidget::StreamTimer => "stream_timer",
             SideWidget::Scene => "scene",
-            SideWidget::Coil => "coil",
+            SideWidget::System => "system",
+            SideWidget::ObsStatus => "obs_status",
+            SideWidget::Mic => "mic",
         }
     }
 }
@@ -165,8 +173,23 @@ pub enum Action {
     Media { key: MediaKey },
     /// Lance une action Streamer.bot (par son nom).
     Streamerbot { action: String },
-    /// Coil : « j'ai tiré », pause imposée de `seconds` avant la prochaine taffe.
-    Coil { seconds: u32 },
+    /// Tape un texte tout prêt (message dans le chat…), puis Entrée si `enter`.
+    Text {
+        text: String,
+        #[serde(default)]
+        enter: bool,
+    },
+    /// Compteur nommé : `step` = +1, −1… ; 0 = remise à zéro. Valeur aussi écrite dans
+    /// `%APPDATA%\soomfon-deck\compteurs\<nom>.txt` pour l'afficher dans OBS.
+    Counter {
+        name: String,
+        #[serde(default = "default_step")]
+        step: i32,
+    },
+    /// Coupe / rétablit le micro par défaut de Windows (toutes les applis à la fois).
+    MicMute,
+    /// Affiche la charge du PC (processeur et mémoire).
+    SystemInfo,
     /// Raccourci clavier ou petite macro : `ctrl+shift+m`, ou `ctrl+c, ctrl+v` (voir plugins/hotkey.rs).
     Hotkey { keys: String },
     /// Ouvre un programme, un fichier, un dossier ou un site web.
@@ -204,6 +227,10 @@ impl Action {
                 | Action::ObsScenesFolder
         )
     }
+}
+
+fn default_step() -> i32 {
+    1
 }
 
 fn default_volume() -> u8 {
@@ -264,9 +291,36 @@ pub fn load(path: &Path) -> Result<Config, String> {
 }
 
 pub fn parse(text: &str) -> Result<Config, String> {
-    let cfg: Config = toml::from_str(text).map_err(|e| format!("config invalide : {e}"))?;
+    let mut raw: toml::Table = toml::from_str(text).map_err(|e| format!("config invalide : {e}"))?;
+    drop_removed_features(&mut raw);
+    let cfg: Config = raw.try_into().map_err(|e| format!("config invalide : {e}"))?;
     cfg.validate()?;
     Ok(cfg)
+}
+
+/// Plugin Coil retiré (2026-11-22) : ses touches disparaissent et sa case de l'écran latéral
+/// devient vide, au lieu de rendre toute la config illisible.
+fn drop_removed_features(raw: &mut toml::Table) {
+    let mut removed = 0;
+    if let Some(toml::Value::Array(pages)) = raw.get_mut("page") {
+        for page in pages.iter_mut() {
+            if let Some(toml::Value::Array(keys)) = page.get_mut("keys") {
+                let before = keys.len();
+                keys.retain(|k| k.get("action").and_then(|a| a.get("type")).and_then(|t| t.as_str()) != Some("coil"));
+                removed += before - keys.len();
+            }
+        }
+    }
+    if let Some(toml::Value::Array(side)) = raw.get_mut("side") {
+        for w in side.iter_mut() {
+            if w.as_str() == Some("coil") {
+                *w = toml::Value::String("none".into());
+            }
+        }
+    }
+    if removed > 0 {
+        log::info!("Config : {removed} touche(s) Coil retirée(s) (plugin supprimé)");
+    }
 }
 
 impl Config {
@@ -327,10 +381,13 @@ impl Config {
                     Action::ObsScenesFolder if is_folder => {
                         errors.push(format!("{at} : pas de dossier dans un dossier (1 seul niveau)"));
                     }
+                    Action::Counter { name, .. } if crate::plugins::counter::file_name(name).is_none() => {
+                        errors.push(format!("{at} : compteur sans nom"));
+                    }
                     Action::Sound { volume, .. } if *volume > 100 => {
                         errors.push(format!("{at} : volume = {volume} : doit être entre 0 et 100"));
                     }
-                    Action::Countdown { seconds: 0 } | Action::Coil { seconds: 0 } => {
+                    Action::Countdown { seconds: 0 } => {
                         errors.push(format!("{at} : la durée doit être d'au moins 1 seconde"));
                     }
                     _ => {}
@@ -386,7 +443,11 @@ fn action_inline(a: &Action) -> String {
         Action::ObsScenesFolder => t("obs_scenes_folder"),
         Action::Media { key } => format!("{{ type = \"media\", key = \"{}\" }}", key.id()),
         Action::Streamerbot { action } => format!("{{ type = \"streamerbot\", action = {} }}", q(action)),
-        Action::Coil { seconds } => format!("{{ type = \"coil\", seconds = {seconds} }}"),
+        Action::Text { text, enter: false } => format!("{{ type = \"text\", text = {} }}", q(text)),
+        Action::Text { text, enter: true } => format!("{{ type = \"text\", text = {}, enter = true }}", q(text)),
+        Action::Counter { name, step } => format!("{{ type = \"counter\", name = {}, step = {step} }}", q(name)),
+        Action::MicMute => t("mic_mute"),
+        Action::SystemInfo => t("system_info"),
         Action::Hotkey { keys } => format!("{{ type = \"hotkey\", keys = {} }}", q(keys)),
         Action::Launch { target, args } if args.is_empty() => format!("{{ type = \"launch\", target = {} }}", q(target)),
         Action::Launch { target, args } => {
@@ -409,7 +470,7 @@ pub fn to_toml(cfg: &Config) -> String {
     // Avant les sections [obs] / [streamerbot] : c'est une valeur de premier niveau.
     let side: Vec<String> = cfg.side.iter().map(|w| q(w.id())).collect();
     out.push_str(&format!(
-        "side = [{}]    # écran de droite, de haut en bas : music, clock, logo, stream_timer, scene, coil, none\n",
+        "side = [{}]    # écran de droite, de haut en bas : music, clock, logo, stream_timer, scene, obs_status, system, mic, none\n",
         side.join(", ")
     ));
     if cfg.obs != ObsConfig::default() {
@@ -586,16 +647,23 @@ mod tests {
             Action::Launch { target: "https://twitch.tv".into(), args: "--new-window \"x\"".into() },
             Action::Sound { file: r"C:\Sons\bruh.mp3".into(), volume: 35 },
             Action::Countdown { seconds: 300 },
+            Action::Text { text: "GG à tous \"les\" 🔥".into(), enter: true },
+            Action::Text { text: "!discord".into(), enter: false },
+            Action::Counter { name: "Morts".into(), step: -1 },
+            Action::MicMute,
         ];
-        for (i, action) in plugins.iter().enumerate() {
-            cfg.pages[1].keys.push(KeyConfig { pos: 6 + i, icon: None, label: None, color: None, action: action.clone() });
+        // Positions libres du dossier (3, 4, 5 sont prises ci-dessus, 14 = Retour).
+        let free = [0, 1, 2, 6, 7, 8, 9, 10, 11, 12, 13];
+        for (pos, action) in free.iter().zip(&plugins) {
+            cfg.pages[1].keys.push(KeyConfig { pos: *pos, icon: None, label: None, color: None, action: action.clone() });
         }
         cfg.side = vec![SideWidget::Scene, SideWidget::None, SideWidget::StreamTimer];
         let text = to_toml(&cfg);
         let back = parse(&text).unwrap();
         assert_eq!(to_toml(&back), text);
         assert_eq!(back.side, vec![SideWidget::Scene, SideWidget::None, SideWidget::StreamTimer]);
-        assert_eq!(back.pages[1].keys[0].label.as_deref(), Some("Il a dit \"bruh\""));
+        let key3 = back.pages[1].keys.iter().find(|k| k.pos == 3).unwrap();
+        assert_eq!(key3.label.as_deref(), Some("Il a dit \"bruh\""));
         assert_eq!(back.obs.port, Some(4456));
         assert_eq!(back.streamerbot.port, Some(8081));
         assert!(back.pages[1].keys.iter().any(|k| k.action == Action::Media { key: MediaKey::Next }));
@@ -603,6 +671,30 @@ mod tests {
         for action in &plugins {
             assert!(back.pages[1].keys.iter().any(|k| k.action == *action), "{action:?}");
         }
+    }
+
+    #[test]
+    fn ancienne_config_avec_coil_toujours_lisible() {
+        let cfg = parse(
+            r#"
+            side = ["coil", "clock", "system"]
+            [[page]]
+            id = "racine"
+            keys = [
+              { pos = 0, action = { type = "obs_record" } },
+              { pos = 9, icon = "misc/coil.svg", label = "30 s", action = { type = "coil", seconds = 30 } },
+            ]
+            [[page]]
+            id = "memes"
+            keys = [{ pos = 14 - 1, action = { type = "coil", seconds = 15 } }]
+            "#
+            .replace("14 - 1", "13")
+            .as_str(),
+        )
+        .unwrap();
+        assert_eq!(cfg.pages[0].keys.len(), 1);
+        assert!(cfg.pages[1].keys.is_empty());
+        assert_eq!(cfg.side, vec![SideWidget::None, SideWidget::Clock, SideWidget::System]);
     }
 
     #[test]

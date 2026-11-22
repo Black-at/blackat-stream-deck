@@ -1,0 +1,73 @@
+# Fabrique l'installeur Windows (.msi) et le publie dans une Release GitHub à chaque envoi de code
+# sur master : un PC qui installe depuis la page Releases (ou le bouton du site) a toujours les
+# derniers plugins.
+#
+# Version du .msi : <majeur>.<mineur> de Cargo.toml + numéro de construction (ex. 0.3.12). Elle
+# augmente à chaque fois, donc Windows remplace bien l'ancienne version à l'installation.
+name: Installeur
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "editor/**"
+      - "launcher/**"
+      - "resources/**"
+      - "installer/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: installeur
+  cancel-in-progress: false
+
+jobs:
+  msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Compilation
+        run: cargo build --release --workspace
+
+      - name: WiX Toolset 3.14
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip -OutFile wix.zip
+          Expand-Archive wix.zip -DestinationPath wix
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $base = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(\d+)\.(\d+)\.' | Select-Object -First 1).Matches[0]
+          $ver = "$($base.Groups[1].Value).$($base.Groups[2].Value).$env:GITHUB_RUN_NUMBER"
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Version du .msi : $ver"
+
+      - name: Installeur .msi
+        run: python installer/make-msi.py --wix wix --version ${{ steps.version.outputs.ver }}
+
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.version.outputs.ver }}
+        run: |
+          $msi = "target/installer/Soomfon-Deck-$env:VER.msi"
+          $log = git log -1 --format=%B
+          $notes = "Installeur fabriqué automatiquement à partir du dernier envoi.`n`n**Changements :**`n$log`n`n**Installer** : télécharge le .msi ci-dessous et lance-le (sans droits administrateur). Si Windows SmartScreen prévient que le fichier n'est pas signé : « Informations complémentaires » puis « Exécuter quand même »."
+          gh release create "v$env:VER" $msi --title "Blackat Stream Deck $env:VER" --notes $notes --latest

@@ -14,6 +14,20 @@ export struct Tile {
     locked: bool,
 }
 
+/// Plugin proposé dans le panneau « Choisir une action ».
+export struct PickerItem {
+    name: string,
+    desc: string,
+    icon: image,
+    id: int,
+    current: bool,
+}
+
+export struct PickerCat {
+    name: string,
+    count: int,
+}
+
 export struct PageItem {
     name: string,
     folder: bool,
@@ -155,8 +169,19 @@ export component MainWindow inherits Window {
     in property <[string]> icons;
     in-out property <int> icon-index;
     in property <image> icon-preview;
-    in property <[string]> action-names;
-    in-out property <int> action-index;
+    // Action de la touche : bouton qui ouvre le panneau de plugins par catégorie.
+    in property <string> action-name;
+    in property <string> action-category;
+    in property <image> action-icon;
+    in-out property <bool> picker-open;
+    in property <[PickerCat]> picker-cats;
+    in-out property <int> picker-cat;
+    in property <[PickerItem]> picker-items;
+    in-out property <string> picker-query;
+    callback open-picker();
+    callback picker-cat-chosen(int);
+    callback picker-query-edited(string);
+    callback picker-chosen(int);
     in property <string> param-kind; // "", "scene", "input", "media", "source", "folder"
     in property <[string]> scene-options;
     in-out property <int> scene-index;
@@ -194,7 +219,6 @@ export component MainWindow inherits Window {
     callback label-edited(string);
     callback color-edited(string);
     callback icon-chosen(int);
-    callback action-chosen(int);
     callback scene-chosen(int);
     callback scene-typed(string);
     callback input-chosen(int);
@@ -203,9 +227,16 @@ export component MainWindow inherits Window {
     callback source-typed(string);
     callback folder-chosen(int);
     callback mediakey-chosen(int);
-    in property <[string]> coil-options;
-    in-out property <int> coil-index;
-    callback coil-chosen(int);
+    in-out property <string> text-value;
+    in-out property <bool> text-enter;
+    callback text-typed(string);
+    callback text-enter-toggled(bool);
+    in-out property <string> counter-name;
+    in property <[string]> counter-steps;
+    in-out property <int> counter-step-index;
+    in property <string> counter-hint;
+    callback counter-typed(string);
+    callback counter-step-chosen(int);
     callback sb-chosen(int);
     callback sb-typed(string);
     // Plugins
@@ -597,10 +628,59 @@ export component MainWindow inherits Window {
 
                             Rectangle { height: 4px; }
                             Caption { text: "ACTION"; }
-                            ComboBox {
-                                model: root.action-names;
-                                current-index <=> root.action-index;
-                                selected => { root.action-chosen(self.current-index); }
+                            Rectangle {
+                                height: 56px;
+                                border-radius: 12px;
+                                background: act-ta.has-hover ? #ffffff10 : Theme.field;
+                                border-width: 1px;
+                                border-color: act-ta.has-hover ? Theme.accent : #ffffff1a;
+                                animate border-color { duration: 120ms; }
+                                HorizontalLayout {
+                                    padding: 8px;
+                                    padding-right: 14px;
+                                    spacing: 10px;
+                                    if !root.selected-empty: Rectangle {
+                                        width: 40px;
+                                        height: 40px;
+                                        border-radius: 9px;
+                                        clip: true;
+                                        Image { source: root.action-icon; width: 40px; height: 40px; }
+                                    }
+                                    if root.selected-empty: Rectangle {
+                                        width: 40px;
+                                        height: 40px;
+                                        border-radius: 9px;
+                                        background: #3a74ff26;
+                                        Text { text: "+"; color: #b9ceff; font-size: 22px; font-weight: 600; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text {
+                                            text: root.selected-empty ? "Choisir une action…" : root.action-name;
+                                            color: Theme.text;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: root.selected-empty ? "Plugins rangés par catégorie" : root.action-category;
+                                            color: Theme.faint;
+                                            font-size: 11px;
+                                        }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Text {
+                                        text: "Changer  ›";
+                                        color: act-ta.has-hover ? #9dbcff : Theme.accent-hover;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                act-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.open-picker(); }
+                                }
                             }
 
                             // Paramètre de l'action
@@ -659,19 +739,46 @@ export component MainWindow inherits Window {
                                     clicked => { root.open-folder(); }
                                 }
                             }
-                            if root.param-kind == "coil": VerticalLayout {
+                            if root.param-kind == "text": VerticalLayout {
                                 spacing: 6px;
-                                Label { text: "Durée de la pause"; }
+                                Label { text: "Texte à écrire"; }
+                                LineEdit {
+                                    placeholder-text: "ex. Merci pour le follow ! 🔥";
+                                    text <=> root.text-value;
+                                    edited(t) => { root.text-typed(t); }
+                                }
+                                CheckBox {
+                                    text: "Appuyer sur Entrée après (envoie le message)";
+                                    checked <=> root.text-enter;
+                                    toggled => { root.text-enter-toggled(self.checked); }
+                                }
+                                Label { text: "Clique d'abord dans le chat (ou le jeu), puis appuie sur la touche : le texte s'écrit là où est le curseur. Accents et émojis acceptés."; font-size: 11px; wrap: word-wrap; }
+                            }
+                            if root.param-kind == "counter": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "Nom du compteur"; }
+                                LineEdit {
+                                    placeholder-text: "ex. Morts";
+                                    text <=> root.counter-name;
+                                    edited(t) => { root.counter-typed(t); }
+                                }
+                                Label { text: "À chaque appui"; }
                                 ComboBox {
-                                    model: root.coil-options;
-                                    current-index <=> root.coil-index;
-                                    selected => { root.coil-chosen(self.current-index); }
+                                    model: root.counter-steps;
+                                    current-index <=> root.counter-step-index;
+                                    selected => { root.counter-step-chosen(self.current-index); }
                                 }
-                                Label {
-                                    text: "Appuie après chaque taffe : la touche (et la case « Coil » de l'écran de droite) affiche le compte à rebours. Un appui pendant la pause affiche « ATTENDS ». Petit son à la fin.";
-                                    font-size: 11px;
-                                    wrap: word-wrap;
-                                }
+                                Label { text: root.counter-hint; font-size: 11px; wrap: word-wrap; }
+                            }
+                            if root.param-kind == "mic": Label {
+                                text: "Coupe ou rétablit le micro par défaut de Windows : Discord, OBS et les jeux l'entendent coupé en même temps. La touche passe au rouge quand il est coupé, même si tu le coupes depuis Windows ou ton casque.";
+                                font-size: 11px;
+                                wrap: word-wrap;
+                            }
+                            if root.param-kind == "system": Label {
+                                text: "Affiche la charge du processeur et de la mémoire, mise à jour chaque seconde (seulement quand la touche est visible). Aucune action à l'appui.";
+                                font-size: 11px;
+                                wrap: word-wrap;
                             }
                             if root.param-kind == "mediakey": VerticalLayout {
                                 spacing: 6px;
@@ -890,6 +997,129 @@ export component MainWindow inherits Window {
                 text: "Démarrer avec Windows";
                 checked <=> root.autostart;
                 toggled => { root.autostart-toggled(self.checked); }
+            }
+        }
+    }
+
+    // ── Panneau « Choisir une action » : plugins par catégorie ──
+    if root.picker-open: Rectangle {
+        background: #02040ad0;
+        // Clic à côté du panneau : on ferme.
+        TouchArea { clicked => { root.picker-open = false; } }
+        Card {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 920px;
+            height: 600px;
+            // Les clics dans le panneau ne le ferment pas.
+            TouchArea { }
+            VerticalLayout {
+                padding: 24px;
+                spacing: 18px;
+                HorizontalLayout {
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: "Choisir une action"; color: Theme.text; font-size: 20px; font-weight: 700; }
+                        Text { text: "Touche " + (root.selected-pos + 1) + " · clique un plugin pour l'appliquer"; color: Theme.muted; font-size: 12px; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    LineEdit {
+                        width: 280px;
+                        placeholder-text: "Rechercher (son, texte, scène…)";
+                        text <=> root.picker-query;
+                        edited(t) => { root.picker-query-edited(t); }
+                    }
+                    RoundButton {
+                        glyph: "×";
+                        danger: true;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.picker-open = false; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        width: 200px;
+                        spacing: 4px;
+                        alignment: start;
+                        for cat[i] in root.picker-cats: Rectangle {
+                            height: 40px;
+                            border-radius: 12px;
+                            background: root.picker-query == "" && root.picker-cat == i
+                                ? @linear-gradient(90deg, #3a74ff 0%, #2a52c9 100%)
+                                : (cat-ta.has-hover ? #ffffff10 : #ffffff00);
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                Text {
+                                    text: cat.name;
+                                    color: root.picker-query == "" && root.picker-cat == i ? #ffffff : Theme.soft;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: cat.count;
+                                    color: root.picker-query == "" && root.picker-cat == i ? #dbe4ff : Theme.faint;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            cat-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.picker-cat-chosen(i); }
+                            }
+                        }
+                    }
+                    Rectangle { width: 1px; background: #ffffff10; }
+                    picker-sv := ScrollView {
+                        horizontal-stretch: 1;
+                        property <length> col-w: (self.visible-width - 12px) / 2;
+                        content-height: Math.ceil(root.picker-items.length / 2) * 96px;
+                        for item[i] in root.picker-items: Rectangle {
+                            x: Math.mod(i, 2) * (picker-sv.col-w + 12px);
+                            y: Math.floor(i / 2) * 96px;
+                            width: picker-sv.col-w;
+                            height: 84px;
+                            border-radius: 14px;
+                            background: it-ta.has-hover ? #ffffff12 : #ffffff07;
+                            border-width: item.current ? 2px : 1px;
+                            border-color: item.current ? Theme.accent : (it-ta.has-hover ? #ffffff2a : #ffffff10);
+                            animate background { duration: 100ms; }
+                            HorizontalLayout {
+                                padding: 12px;
+                                spacing: 12px;
+                                Rectangle {
+                                    width: 60px;
+                                    height: 60px;
+                                    border-radius: 12px;
+                                    clip: true;
+                                    Image { source: item.icon; width: 60px; height: 60px; }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: item.name; color: Theme.text; font-size: 13.5px; font-weight: 600; }
+                                    Text { text: item.desc; color: Theme.muted; font-size: 11.5px; wrap: word-wrap; }
+                                }
+                            }
+                            it-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.picker-chosen(item.id);
+                                    root.picker-open = false;
+                                }
+                            }
+                        }
+                        if root.picker-items.length == 0: Text {
+                            y: 20px;
+                            text: "Aucun plugin ne correspond à « " + root.picker-query + " ».";
+                            color: Theme.muted;
+                        }
+                    }
+                }
             }
         }
     }

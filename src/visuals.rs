@@ -5,9 +5,8 @@ use crate::{
     app::format_duration,
     clock::LocalTime,
     config::{Action, KeyConfig, SideWidget, parse_color},
-    coil::CoilView,
     media::NowPlaying,
-    plugins::countdown,
+    plugins::{countdown, system::Stats},
     render::{Dial, KeyVisual, TextLine},
 };
 
@@ -60,7 +59,7 @@ pub fn countdown_visual(idle: KeyVisual, view: countdown::View, seconds: u32) ->
         countdown::View::Running { left, progress } => {
             let late = left <= 10;
             let text = format_duration(left);
-            let size = if text.len() > 5 { 17 } else { 24 };
+            let size = if text.len() > 5 { 15 } else { 21 };
             KeyVisual {
                 bg: if late { [52, 16, 20] } else { [12, 20, 40] },
                 dial: Some(Dial {
@@ -94,7 +93,12 @@ pub struct SideState<'a> {
     pub scene: Option<&'a str>,
     pub obs_connected: bool,
     pub time: LocalTime,
-    pub coil: CoilView,
+    /// Charge du PC (`None` = pas encore mesurée).
+    pub system: Option<Stats>,
+    /// Micro Windows coupé (`None` = inconnu / pas de micro).
+    pub mic_muted: Option<bool>,
+    pub record_active: bool,
+    pub record_paused: bool,
 }
 
 /// Libellé d'un contenu de l'écran latéral (éditeur).
@@ -104,7 +108,9 @@ pub fn side_label(widget: SideWidget) -> &'static str {
         SideWidget::Clock => "Heure et date",
         SideWidget::Logo => "Logo Blackat",
         SideWidget::StreamTimer => "Chrono du live",
-        SideWidget::Coil => "Coil (pause vape)",
+        SideWidget::System => "Charge du PC (CPU, RAM)",
+        SideWidget::ObsStatus => "État OBS (REC, LIVE)",
+        SideWidget::Mic => "Micro Windows (coupé ?)",
         SideWidget::Scene => "Scène OBS active",
         SideWidget::None => "Vide",
     }
@@ -148,7 +154,27 @@ pub fn side_visual(widget: SideWidget, s: &SideState) -> KeyVisual {
                 v.lines.push(TextLine::new("Hors live", 11, GREY, 1));
             }
         },
-        SideWidget::Coil => return coil_visual(&s.coil, None),
+        SideWidget::System => return system_visual(s.system, [10, 14, 26]),
+        SideWidget::Mic => return mic_visual(s.mic_muted, None),
+        SideWidget::ObsStatus => {
+            if !s.obs_connected {
+                v.icon = Some("obs/scene.svg".into());
+                v.lines.push(TextLine::new("OBS fermé", 11, GREY, 1));
+                v.dim = true;
+            } else {
+                let dot = |on: bool| if on { "●" } else { "○" };
+                let rec_color = if s.record_paused { PAUSED_AMBER } else if s.record_active { [255, 90, 90] } else { GREY };
+                let live_color = if s.stream_elapsed.is_some() { [255, 90, 90] } else { GREY };
+                if s.record_active || s.stream_elapsed.is_some() {
+                    v.bg = [40, 10, 14];
+                }
+                let rec = if s.record_paused { "PAUSE REC".to_string() } else { format!("{} REC", dot(s.record_active)) };
+                v.lines = vec![
+                    TextLine::new(rec, 15, rec_color, 1),
+                    TextLine::new(format!("{} LIVE", dot(s.stream_elapsed.is_some())), 15, live_color, 1),
+                ];
+            }
+        }
         SideWidget::Scene => {
             v.icon = Some("obs/scene.svg".into());
             match (s.scene, s.obs_connected) {
@@ -163,60 +189,64 @@ pub fn side_visual(widget: SideWidget, s: &SideState) -> KeyVisual {
     v
 }
 
-// ── Coil ────────────────────────────────────────────────────────────────────
-
-/// Résistance chaude juste après une taffe (orange) → refroidie (cyan), comme dans l'appli.
-pub const COIL_HOT: [u8; 3] = [255, 122, 26];
-pub const COIL_COOL: [u8; 3] = [63, 216, 255];
-/// Étape intermédiaire du refroidissement (évite le vert-gris d'un mélange direct orange/cyan).
-const COIL_MID: [u8; 3] = [176, 92, 255];
-const COIL_BG: [u8; 3] = [8, 11, 20];
-
-fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
-    let t = t.clamp(0.0, 1.0);
-    [0, 1, 2].map(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).round() as u8)
-}
-
-/// Coil : cadran de la pause. `idle` = apparence au repos (touche : icône + libellé ;
-/// `None` = écran latéral : cadran « PRÊT » et taffes du jour).
-pub fn coil_visual(c: &CoilView, idle: Option<(&str, Option<&str>)>) -> KeyVisual {
-    const WHITE: [u8; 3] = [255, 255, 255];
+/// Charge du PC : processeur en grand, mémoire en dessous (touche « Infos PC » et écran latéral).
+pub fn system_visual(stats: Option<Stats>, bg: [u8; 3]) -> KeyVisual {
     const GREY: [u8; 3] = [140, 155, 185];
-    let mut v = KeyVisual { bg: COIL_BG, ..KeyVisual::blank() };
-    let taffes = |n: u32| if n > 1 { format!("{n} taffes") } else { format!("{n} taffe") };
-    match c.remaining {
-        Some(left) => {
-            let color = if c.heat > 0.5 {
-                mix(COIL_MID, COIL_HOT, (c.heat - 0.5) * 2.0)
-            } else {
-                mix(COIL_COOL, COIL_MID, c.heat * 2.0)
+    let mut v = KeyVisual { bg, ..KeyVisual::blank() };
+    match stats {
+        Some(st) => {
+            // Vert → orange → rouge selon la charge du processeur.
+            let color = match st.cpu {
+                0..=59 => [126, 226, 168],
+                60..=84 => [255, 190, 90],
+                _ => [255, 100, 95],
             };
-            v.dial = Some(Dial {
-                lit: (c.progress * 60.0).round() as u8,
-                color,
-                embers: if c.heat > 0.35 { (c.heat * 255.0) as u8 } else { 0 },
-                phase: (c.phase % 251) as u8,
-            });
-            if c.waiting {
-                v.lines = vec![TextLine::new("ATTENDS", 12, [255, 110, 100], 1), TextLine::new(format!("{left}"), 22, WHITE, 1)];
-            } else {
-                v.lines = vec![TextLine::new(format!("{left}"), 27, WHITE, 1), TextLine::new("pause", 10, GREY, 1)];
-            }
+            v.lines = vec![
+                TextLine::new("CPU", 10, GREY, 1),
+                TextLine::new(format!("{} %", st.cpu), 21, color, 1),
+                TextLine::new(format!("RAM {} %", st.ram), 11, [220, 228, 255], 1),
+            ];
         }
-        None => match idle {
-            Some((label, icon)) if !c.ready => {
-                v.bg = [20, 26, 40];
-                v.icon = Some(icon.unwrap_or("misc/coil.svg").to_string());
-                v.label = Some(label.to_string());
-            }
-            _ => {
-                if c.ready {
-                    v.bg = [10, 38, 50];
-                }
-                v.dial = Some(Dial { lit: 60, color: COIL_COOL, embers: 0, phase: 0 });
-                v.lines = vec![TextLine::new("PRÊT", 15, if c.ready { WHITE } else { COIL_COOL }, 1), TextLine::new(taffes(c.today), 10, GREY, 1)];
-            }
-        },
+        None => v.lines = vec![TextLine::new("CPU", 10, GREY, 1), TextLine::new("…", 20, GREY, 1)],
     }
     v
+}
+
+/// Micro Windows : rouge et barré quand il est coupé. `idle` = touche configurée (texte, fond).
+pub fn mic_visual(muted: Option<bool>, idle: Option<KeyVisual>) -> KeyVisual {
+    let mut v = idle.unwrap_or_else(|| KeyVisual { bg: [10, 14, 26], ..KeyVisual::blank() });
+    match muted {
+        Some(true) => {
+            v.bg = ACTIVE_RED;
+            v.icon = Some("obs/mic-off.svg".into());
+            v.label = Some("Micro coupé".into());
+        }
+        Some(false) => {
+            v.icon = Some("obs/mic.svg".into());
+            if v.label.is_none() {
+                v.label = Some("Micro actif".into());
+            }
+        }
+        None => {
+            v.icon = Some("obs/mic.svg".into());
+            v.label = Some("Pas de micro".into());
+            v.dim = true;
+        }
+    }
+    v
+}
+
+/// Compteur : valeur en grand, nom en dessous ; le fond choisi dans l'éditeur est gardé.
+pub fn counter_visual(idle: KeyVisual, name: &str, value: i64) -> KeyVisual {
+    let label = idle.label.clone().unwrap_or_else(|| name.to_string());
+    let size = match value.to_string().len() {
+        0..=3 => 27,
+        4 => 22,
+        _ => 16,
+    };
+    KeyVisual {
+        bg: idle.bg,
+        lines: vec![TextLine::new(value.to_string(), size, [255, 255, 255], 1), TextLine::new(label, 10, [200, 212, 240], 1)],
+        ..KeyVisual::blank()
+    }
 }
